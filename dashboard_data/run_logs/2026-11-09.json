@@ -1,0 +1,18 @@
+{
+  "issue_day": "2026-11-09",
+  "forecast_day": "2026-11-10",
+  "started_at_utc": "2026-11-09 17:24:02.814532+00:00",
+  "completed_at_utc": "2026-11-09 17:24:03.191872+00:00",
+  "result": "bootstrap_only",
+  "fit_mode": null,
+  "training_data_status": "complete",
+  "model_fitted_at_utc": "2026-11-09 17:24:02.814532+00:00",
+  "training_start_utc": "2025-11-08 23:00:00+00:00",
+  "training_end_exclusive_utc": "2026-11-08 23:00:00+00:00",
+  "train_rows": 34944,
+  "dropped_train_days": [
+    "2026-06-24"
+  ],
+  "attempts": [],
+  "failure_reason": null
+}

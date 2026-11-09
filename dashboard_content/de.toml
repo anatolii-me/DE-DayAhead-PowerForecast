@@ -45,6 +45,7 @@ status_unavailable = "Noch keine erfolgreiche geplante Aktualisierung veröffent
 run_log_label = "Protokoll der letzten Aktualisierung"
 forward_unavailable = "Eine aktuelle Day-Ahead-Prognose wurde noch nicht veröffentlicht. Das Diagramm zeigt nur bereits bewertete Prognosen und verlängert keine alte Prognose künstlich bis morgen."
 weather_unavailable = "Keine Prognose für {day}: Der aktuelle ECMWF-Wetterlauf war bis zum Stichtag um 11:15 Uhr Europe/Berlin nicht verfügbar."
+bootstrap_only = "Das erste Modell ist vorbereitet. Die erste Live-Prognose wird beim nächsten geplanten Morgenlauf veröffentlicht, sofern Wetterdaten verfügbar sind."
 deadline_missed = "Keine Prognose für {day}: Der geplante Lauf erreichte den Stichtag um 11:15 Uhr Europe/Berlin, bevor die Quellenprüfung abgeschlossen war."
 model_unavailable = "Keine Prognose für {day}: Das benötigte Modell, die Kapazitätsdaten oder Trainingsdaten waren nicht verfügbar. Details stehen im Aktualisierungsprotokoll."
 model_reused_generation = "ENTSO-E-Erzeugungsdaten für D−2 waren unvollständig. Die Prognose für {day} nutzt das zuletzt trainierte Modell ({age} Tag(e) alt)."

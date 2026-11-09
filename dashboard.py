@@ -269,6 +269,8 @@ def render_offshore(copy: dict, dark: bool, german: bool) -> None:
                             unsafe_allow_html=True)
                 if status.get("forecast_status") == "weather_unavailable":
                     st.warning(copy["offshore"]["weather_unavailable"].format(day=status["forecast_day"]))
+                elif status.get("forecast_status") == "bootstrap_only":
+                    st.info(copy["offshore"]["bootstrap_only"])
                 elif status.get("forecast_status") == "deadline_missed":
                     st.warning(copy["offshore"]["deadline_missed"].format(day=status["forecast_day"]))
                 elif status.get("forecast_status") in {"model_unavailable", "fit_failed"}:

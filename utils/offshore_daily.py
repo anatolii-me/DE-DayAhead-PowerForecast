@@ -39,6 +39,15 @@ def _generation_complete(generation: pd.DataFrame, day: pd.Timestamp) -> bool:
     return bool(np.isfinite(values).all() and values.ge(0).all())
 
 
+def _check_public_credentials(public: Path) -> None:
+    key = os.getenv("ENTSOE_API_KEY", "")
+    if key:
+        secret = key.encode("utf-8")
+        for path in public.rglob("*"):
+            if path.is_file() and secret in path.read_bytes():
+                raise DashboardDataError(f"Credential value found in public artifact: {path.name}")
+
+
 def wait_for_critical_sources(root: Path, generation: pd.DataFrame, end_day: pd.Timestamp,
                               features: list[str], log: dict, *, clock=None, sleep=None):
     """Retry D-2 actuals and today's weather independently up to 11:15 Berlin."""
@@ -243,12 +252,7 @@ def run(root: Path, *, update: bool = True) -> None:
                     "dropped_train_days": model_meta.get("dropped_train_days"),
                     "failure_reason": failure_reason})
         _write_json(public / "run_logs" / f"{today.date()}.json", log)
-    key = os.getenv("ENTSOE_API_KEY", "")
-    if key:
-        secret = key.encode("utf-8")
-        for path in public.rglob("*"):
-            if path.is_file() and secret in path.read_bytes():
-                raise DashboardDataError(f"Credential value found in public artifact: {path.name}")
+    _check_public_credentials(public)
     print(f"Complete source days: {int(coverage.row_complete.sum())}/{len(coverage)}; latest {end_day.date()}")
 
 
@@ -270,6 +274,30 @@ def bootstrap_model(root: Path) -> None:
     if not bool(coverage.loc[end_day].row_complete):
         raise DashboardDataError(f"Cannot bootstrap: {end_day.date()} is incomplete.")
     _, metadata = fit_model_snapshot(root, dataset, today + pd.DateOffset(days=1), selection)
+    updated = str(pd.Timestamp.now(tz="UTC"))
+    actuals = dataset.gen_wind_off_act.dropna()
+    status = {
+        "last_updated_utc": updated,
+        "fitted_at_utc": metadata["fitted_at_utc"],
+        "latest_actual_utc": str(actuals.index.max()) if not actuals.empty else None,
+        "forecast_day": str((today + pd.DateOffset(days=1)).date()),
+        "forecast_status": "bootstrap_only", "fit_mode": None,
+        "model_age_days": None, "training_data_status": "complete",
+        "failure_reason": None,
+    }
+    _write_json(public / "status.json", status)
+    _write_json(public / "run_logs" / f"{today.date()}.json", {
+        "issue_day": str(today.date()), "forecast_day": status["forecast_day"],
+        "started_at_utc": metadata["fitted_at_utc"], "completed_at_utc": updated,
+        "result": "bootstrap_only", "fit_mode": None,
+        "training_data_status": "complete", "model_fitted_at_utc": metadata["fitted_at_utc"],
+        "training_start_utc": metadata["training_start_utc"],
+        "training_end_exclusive_utc": metadata["training_end_exclusive_utc"],
+        "train_rows": metadata["train_rows"],
+        "dropped_train_days": metadata["dropped_train_days"],
+        "attempts": [], "failure_reason": None,
+    })
+    _check_public_credentials(public)
     print(f"Bootstrapped model fitted at {metadata['fitted_at_utc']}; training ends {metadata['training_end_exclusive_utc']}")
 
 
