@@ -1,146 +1,56 @@
-# Day-Ahead Forecasting for the German Energy Market
+# Day-Ahead Power and Price Forecasting for Germany
 
-An English/German Streamlit dashboard for day-ahead generation forecasting in
-the Germany–Luxembourg (DE_LU) market. The first live view is offshore wind;
-onshore wind, solar, load and day-ahead price views are marked as in
-development. The other top-level tabs are General Info and a future BESS use
-case.
+A day-ahead forecasting project for the Germany–Luxembourg electricity market. It starts with offshore wind generation and will extend to solar, onshore wind, electricity load, and day-ahead prices. The forecasts are shown at 15-minute resolution.
 
-The offshore view displays the notebook-6 production candidate, **XGBoost HPO
-with L1 loss**. The chart opens on the latest seven local delivery days and can
-be zoomed or moved through the full evaluated forecast history with its range
-slider. Forecast and actual generation are both shown in **MW**, converted from
-capacity factor using the installed capacity at each target interval (which
-can change over time). A separately issued forecast for tomorrow is drawn
-without an actual-generation line until the fact arrives. D-1 and D are
-shaded only when that current forward artifact exists; the refit time and its
-365-day training-data range appear below the chart. It reports nMAE, nRMSE,
-R², skill against the actual
-capacity factor at the same local quarter-hour one week earlier, plus MAE and
-90th-percentile absolute error in MW. The table compares the last 365 local
-delivery days with all available evaluated history. The large accuracy number
-is simply `100% − nMAE` for the last year; it is an accessible summary, not a
-probabilistic guarantee.
+**[Explore the dashboard](https://de-dayahead-powerforecast.streamlit.app/)**
 
-## Edit the words and links yourself
+## Current results
 
-No Python changes are needed for normal copy edits:
+The first deployed model forecasts offshore wind generation with XGBoost. The figures below are from the latest 365 local delivery days available in the repository, ending on 8 November 2026. They cover 34,944 evaluated 15-minute intervals.
 
-- [`dashboard_content/en.toml`](dashboard_content/en.toml) — all English text:
-  header, labels, notes, metric explanations, disclaimer and placeholders.
-- [`dashboard_content/de.toml`](dashboard_content/de.toml) — matching German
-  text. English is selected by default; keep both files' keys when editing.
-- [`dashboard_content/links.toml`](dashboard_content/links.toml) — LinkedIn,
-  Xing and GitHub URLs. An empty value hides that link. The supplied public
-  profile links are already included.
+| Forecast | nMAE ↓ | nRMSE ↓ | R² ↑ |
+| --- | ---: | ---: | ---: |
+| Offshore wind | **0.0643** | **0.0902** | **0.8433** |
+| Solar generation | In development | In development | In development |
+| Onshore wind | In development | In development | In development |
+| Electricity load | In development | In development | In development |
+| Day-ahead prices | In development | In development | In development |
 
-The header is under `[hero]`. To change the degree, edit the `byline` value;
-Markdown such as `**bold**` is supported in the header and section paragraphs.
-To add General Info later, fill the `[general_info]` `body` value in **both**
-language files. A multiline TOML string works well, for example:
+The offshore model predicts **capacity factor**: generation divided by installed capacity.  This lets it learn the relationship between weather and output while the wind fleet grows. The dashboard converts the forecast back to MW using the installed capacity for each delivery interval. The same approach is planned for subsequent generation models.
 
-```toml
-[general_info]
-body = """
-### Forecast workflow
+nMAE and nRMSE are errors on the 0–1 capacity-factor scale; an nMAE of 0.0643 means an average error of 6.43 percentage points of capacity factor. R² measures how much variation in observed capacity factor the predictions explain. These trailing-year figures include dates used during model development, so they should be read as retrospective performance, not as an independent test result. The [research notebooks](notebooks/research_wind_offshore_model/) document the separate chronological evaluations and model selection.
 
-The model trains on the most recent 365 available days ending at D-2.
+## Data and forecasting approach
 
-### Data sources
+- **Weather:** Hourly ECMWF IFS forecasts are retrieved through the Open-Meteo Single Runs API for 14 locations in the North Sea and Baltic Sea. For delivery day D, the model uses only the single **00:00 UTC run from D−1**. A forecast assembled from different runs could include information that was unavailable when the day-ahead prediction had to be made.
+- **Target and capacity:** Actual offshore generation and installed capacity come from ENTSO-E. Generation is converted from MW to capacity factor for training. Actual generation and installed capacity are never used as predictors for the same target interval.
+- **15-minute features:** The hourly weather forecast is interpolated to the 15-minute delivery grid. Interpolation stays within the same forecast run and location, and only fills intervals between consecutive known forecast hours. Wind direction is converted to vector components before interpolation; wind-power proxies and turbine operating flags are calculated afterwards. This creates a useful time grid without claiming to recover weather changes that the hourly forecast cannot show.
+- **Training and evaluation:** The model is refitted for each target day using the preceding 365 calendar days, ending with D−2. Experiments use chronological splits rather than randomly mixing nearby intervals. Hyperparameters and training loss were selected on development data, then checked on later days.
 
-Describe your sources here.
-"""
-```
+I do not use ENTSO-E's published generation forecasts as model inputs. Historical downloads may contain revised or combined forecasts whose exact pre-auction version cannot be verified. That could give the model information it would not have had at prediction time. Forecasting generation from a known weather run provides a more consistent input for the future price model.
 
-The layout uses content-sized panels, so text can grow without adjusting fixed
-heights. Colors and layout CSS are in [`dashboard.py`](dashboard.py), and the
-base Streamlit theme is in [`.streamlit/config.toml`](.streamlit/config.toml).
+## What the offshore research found
 
-### Change tab content or navigation
+- **Location-level weather matters.** Keeping a wind-power proxy for each of the 14 locations worked better than using only regional averages. The selected interpolated feature set also performed as well as or better than much larger alternatives, so extra features were not added just for a marginal score change.
+- **Interpolation earned its place through comparison.** The first dataset copied each hourly forecast across four 15-minute intervals. A quarter-hour position feature and differences from the neighbouring hours of the same weather run gave the model some time context, but the weather values still changed in steps. I later compared interpolation methods by hiding known hourly values, then compared the resulting feature sets with chronological model validation. The selected approach uses shape-preserving cubic interpolation (PCHIP) and achieved the best balance of accuracy and feature count. Interpolated values remain estimates: the hourly source cannot tell us the true weather between forecast hours.
+- **A deployment-like schedule changed the choice.** Short training windows and infrequent refits generally performed worse. A 365-day sliding window with daily refitting gave a practical balance of accuracy, stability, and available history.
+- **The best development score was not the whole decision.** LightGBM led parts of development, and CatBoost led the first, short holdout. On a later 114-day comparison, the tuned XGBoost model had the lowest mean daily MAE and improved on its own simple L2 baseline. It was selected for the first release because its advantage held more consistently across the evaluated periods. Errors at high capacity factors remain a weakness, and that range has relatively few observations.
+- **More complex methods did not automatically help.** Ridge regression and a small neural network lagged behind the tree models in the initial comparison. Additional weather features and alternative loss functions were retained only when their benefits survived chronological evaluation.
 
-- Edit `[forecasting]`, `[offshore]`, `[general_info]` or `[use_case]` in both
-  language files to change the text in those views. The `coming_soon` value is
-  shared by all four forecast placeholders.
-- To add, remove or reorder a **forecast** tab, edit `FORECAST_TAB_KEYS` near the
-  top of [`dashboard.py`](dashboard.py). Add a matching key and label under
-  `[forecasting]` in both language files. Any key other than `offshore` shows
-  the standard in-development placeholder until you add its rendering logic
-  in `render_forecasting()`.
-- To add or remove a **top-level** tab, edit the `st.tabs(...)` list and matching
-  `with ...:` content in `main()` in [`dashboard.py`](dashboard.py), plus its
-  label under `[navigation]` in both language files.
+The dashboard is updated from a daily forecast pipeline. Its historical scores are a retrospective simulation using currently available source records, which may include later ENTSO-E corrections.
 
-## Run locally
+## Roadmap
 
-Use Python 3.13. The repository contains a compact public artifact snapshot; then:
+| Stage | Data design | Data collection | Feature engineering | Model tuning |
+| --- | --- | --- | --- | --- |
+| Offshore wind | Complete | Complete | Complete | Complete; daily forecast available |
+| Solar generation | Planned | Planned | Planned | Planned |
+| Onshore wind | Planned | Planned | Planned | Planned |
+| Electricity load | Planned | Planned | Planned | Planned |
+| Day-ahead prices | Planned | Planned | Planned | Planned |
 
-```powershell
-python -m pip install -r requirements-dashboard.txt
-streamlit run dashboard.py
-```
+The price model is the final stage. When generation and load forecasts become its inputs during training, they will need predictions made **out of sample** for each training period.
 
-The dashboard **reads** saved predictions; opening it does not retrain a model
-or fetch data. The daily pipeline trains each target day's model on the most
-recent 365 local calendar days ending at D-2 23:45 Europe/Berlin. DST delivery
-days have 92 or 100 quarter-hours, rather than 96.
+## Research notebooks
 
-### Publish a genuine forecast for tomorrow
-
-To refresh source data, extend the historical simulation, and issue a forecast
-for tomorrow, install the full model runtime and run on **D-1**:
-
-```powershell
-python -m pip install -r requirements-offshore-final.txt
-python -m utils.offshore_daily
-```
-
-The command retries missing source days, refreshes recent ENTSO-E revisions,
-recreates the feature dataset, and trains the frozen XGBoost HPO L1 model. It
-only publishes if D-2 and the target weather/capacity grid are complete. Public
-artifacts go to `dashboard_data/`; no API credential is stored there. Forecasts
-issued live are archived and remain unchanged when later actuals arrive.
-Historical simulation for earlier days uses the correct D-1 weather run and
-D-2 training cutoff, but historical source revisions are not point-in-time
-snapshots. Its metrics therefore describe a retrospective simulation, not a
-fully auditable live trading record.
-
-`.github/workflows/offshore-daily.yml` runs once daily at 07:15 UTC and can also
-be started manually. It uses the `ENTSOE_API_KEY` GitHub Actions secret, commits
-only `dashboard_data/` on success, and never writes the key to the dashboard.
-GitHub scheduled jobs can start late or be skipped, so check the displayed last
-successful update. A forecast fitted at or after the SDAC gate closure at
-12:00 Europe/Berlin is rejected. The dashboard shows a dashed line at the last actual
-interval (D-2 23:45 Europe/Berlin); D-1 actuals are withheld until the next
-model update.
-
-To publish the public URL, connect the repository to Streamlit Community Cloud
-and select `dashboard.py` on `main`. The root `requirements.txt` contains the
-small dashboard runtime; `requirements-offshore-final.txt` is used only by the
-daily workflow, and `requirements-research.txt` preserves the original notebook
-environment. Community Cloud updates the app when the workflow commits new
-artifacts. A public repository creates a public app by default.
-
-`results/` remains outside Git because it contains large generated artifacts.
-The dashboard reads compact public prediction and actual-data parquets from
-`dashboard_data/` for time-varying installed capacity and observed capacity factor.
-The loader verifies that historical `capacity_factor × capacity × 1000`
-reconstructs source actual MW, so a revised or mismatched capacity snapshot
-cannot silently corrupt the chart. Forecast MW likewise use the capacity
-effective at each target interval; the forward command reads the monthly
-capacity series using backward-as-of alignment and rejects stale values.
-For deployment, make these artifacts available to the app and optionally set:
-
-- `OFFSHORE_HISTORICAL_PREDICTIONS`
-- `OFFSHORE_LATEST_PREDICTIONS`
-- `OFFSHORE_ACTUAL_DATASET`
-- `OFFSHORE_FORWARD_PREDICTIONS`
-
-The capacity dataset must cover *every* forecast target interval. If it does
-not, the app shows an explicit error instead of mislabelling CF as MW.
-
-## Continuous checks
-
-`.github/workflows/dashboard-checks.yml` installs the small dashboard runtime,
-compiles the app and runs deterministic dashboard tests on relevant pull
-requests and pushes to `main`. It does not retrain models or require ENTSO-E
-credentials.
+The [offshore research notebooks](notebooks/research_wind_offshore_model/) cover data preparation, interpolation, baseline models, feature selection, training-window and refit-schedule selection, joint loss and hyperparameter optimization, and the final comparison on later data.
