@@ -58,7 +58,9 @@ def _save_model(model, metadata: dict, directory: Path) -> None:
     temporary = directory / "latest.tmp.ubj.gz"
     try:
         raw = model.get_booster().save_raw(raw_format="ubj")
-        temporary.write_bytes(gzip.compress(raw))
+        compressed = gzip.compress(raw)
+        metadata["model_sha256"] = hashlib.sha256(compressed).hexdigest()
+        temporary.write_bytes(compressed)
         os.replace(temporary, directory / "latest.ubj.gz")
     finally:
         temporary.unlink(missing_ok=True)
@@ -222,13 +224,16 @@ def issue_tomorrow_forecast(
         metadata = json.loads(meta_path.read_text(encoding="utf-8"))
         if metadata.get("selection_hash") != _selection_hash(selection) or metadata.get("features") != features:
             raise DashboardDataError("The saved model does not match the frozen selection.")
+        compressed_model = model_path.read_bytes()
+        if metadata.get("model_sha256") != hashlib.sha256(compressed_model).hexdigest():
+            raise DashboardDataError("The saved model does not match its metadata checksum.")
         fitted_at = pd.Timestamp(metadata["fitted_at_utc"])
         end_utc = pd.Timestamp(metadata["training_end_exclusive_utc"])
         start_utc = pd.Timestamp(metadata["training_start_utc"])
         age_days = (now.normalize() - fitted_at.tz_convert(BERLIN_TIMEZONE).normalize()).days
         if age_days < 1 or end_utc >= (target_day - pd.DateOffset(days=1)).tz_convert("UTC"):
             raise DashboardDataError("The saved model has invalid fallback provenance.")
-        model.load_model(bytearray(gzip.decompress(model_path.read_bytes())))
+        model.load_model(bytearray(gzip.decompress(compressed_model)))
         train_count = int(metadata["train_rows"])
         dropped_days = metadata["dropped_train_days"]
     else:

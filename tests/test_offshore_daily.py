@@ -10,7 +10,7 @@ import pandas as pd
 
 from utils.offshore_daily import wait_for_critical_sources
 from utils.offshore_day_ahead import issue_tomorrow_forecast
-from utils.offshore_dashboard import DashboardPaths, load_forward_predictions
+from utils.offshore_dashboard import DashboardDataError, DashboardPaths, load_forward_predictions
 from utils.offshore_final_data import grid
 
 
@@ -43,6 +43,15 @@ class RetryTests(unittest.TestCase):
             self.assertTrue(forward.prediction.between(0, 1).all())
             self.assertEqual(forward.fit_mode.iloc[0], "reused")
             self.assertEqual(forward.model_age_days.iloc[0], 1)
+            metadata_path = public / "model/metadata.json"
+            metadata = json.loads(metadata_path.read_text())
+            metadata["model_sha256"] = "0" * 64
+            metadata_path.write_text(json.dumps(metadata))
+            with self.assertRaises(DashboardDataError):
+                issue_tomorrow_forecast(
+                    Path(tmp), dataset=pd.DataFrame(index=pd.DatetimeIndex([], tz="UTC")),
+                    weather=weather, reuse_model=True,
+                    clock=lambda: issue_time.tz_convert("UTC"))
 
     def test_both_sources_recover_after_cooldown(self):
         day = pd.Timestamp("2026-01-18")

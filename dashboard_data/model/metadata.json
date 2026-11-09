@@ -48,5 +48,6 @@
   "train_rows": 34944,
   "dropped_train_days": [
     "2026-06-24"
-  ]
+  ],
+  "model_sha256": "f2e60dd9924a6455752cdbd6b8d292a110e7d80d36ef36b0800214d97755ef66"
 }
