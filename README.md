@@ -1,6 +1,6 @@
-# Day-Ahead Power and Price Forecasting for Germany
+# Day-Ahead Power and Price Forecasting for the DE-LU Bidding Zone
 
-A day-ahead forecasting project for the Germany–Luxembourg electricity market. It starts with offshore wind generation and will extend to solar, onshore wind, electricity load, and day-ahead prices. The forecasts are shown at 15-minute resolution.
+A day-ahead forecasting project for the Germany–Luxembourg (DE-LU) electricity bidding zone. The project starts with offshore wind generation and will extend to solar, onshore wind, electricity load, and day-ahead prices. Forecasts are shown at 15-minute resolution.
 
 **[Explore the dashboard](https://de-dayahead-powerforecast.streamlit.app/)**
 
@@ -23,7 +23,7 @@ nMAE and nRMSE are errors on the 0–1 capacity-factor scale; an nMAE of 0.0643 
 ## Data and forecasting approach
 
 - **Weather:** Hourly ECMWF IFS forecasts are retrieved through the Open-Meteo Single Runs API for 14 locations in the North Sea and Baltic Sea. For delivery day D, the model uses only the single **00:00 UTC run from D−1**. A forecast assembled from different runs could include information that was unavailable when the day-ahead prediction had to be made.
-- **Target and capacity:** Actual offshore generation and installed capacity come from ENTSO-E. Generation is converted from MW to capacity factor for training. Actual generation and installed capacity are never used as predictors for the same target interval.
+- **Target and capacity:** Actual offshore generation is queried from ENTSO-E for the `DE_LU` area. Monthly installed offshore capacity comes from Energy-Charts for Germany (`country="de"`). Generation is converted from MW to capacity factor for training. Actual generation and installed capacity are never used as predictors for the same target interval.
 - **15-minute features:** The hourly weather forecast is interpolated to the 15-minute delivery grid. Interpolation stays within the same forecast run and location, and only fills intervals between consecutive known forecast hours. Wind direction is converted to vector components before interpolation; wind-power proxies and turbine operating flags are calculated afterwards. This creates a useful time grid without claiming to recover weather changes that the hourly forecast cannot show.
 - **Training and evaluation:** The model is refitted for each target day using the preceding 365 calendar days, ending with D−2. Experiments use chronological splits rather than randomly mixing nearby intervals. Hyperparameters and training loss were selected on development data, then checked on later days.
 
@@ -49,7 +49,7 @@ The dashboard is updated from a daily forecast pipeline. Its historical scores a
 | Electricity load | Planned | Planned | Planned | Planned |
 | Day-ahead prices | Planned | Planned | Planned | Planned |
 
-The price model is the final stage. When generation and load forecasts become its inputs during training, they will need predictions made **out of sample** for each training period.
+The price model is the final stage. Its planned target is the DE-LU day-ahead wholesale price in EUR/MWh. When generation and load forecasts become its inputs during training, they will need predictions made **out of sample** for each training period.
 
 ## Research notebooks
 
