@@ -256,15 +256,32 @@ def render_offshore(copy: dict, dark: bool, german: bool) -> None:
             try:
                 status = json.loads(status_path.read_text(encoding="utf-8"))
                 updated = pd.Timestamp(status["last_updated_utc"]).tz_convert(BERLIN_TIMEZONE)
-                fitted = pd.Timestamp(status["fitted_at_utc"]).tz_convert(BERLIN_TIMEZONE)
-                actual = pd.Timestamp(status["latest_actual_utc"]).tz_convert(BERLIN_TIMEZONE)
+                fitted = (pd.Timestamp(status["fitted_at_utc"]).tz_convert(BERLIN_TIMEZONE)
+                          if status.get("fitted_at_utc") else None)
+                actual = (pd.Timestamp(status["latest_actual_utc"]).tz_convert(BERLIN_TIMEZONE)
+                          if status.get("latest_actual_utc") else None)
                 status_text = copy["offshore"]["status_note"].format(
                     updated=f"{updated:%d.%m.%Y %H:%M %Z}",
-                    fitted=f"{fitted:%d.%m.%Y %H:%M %Z}",
-                    actual=f"{actual:%d.%m.%Y %H:%M %Z}",
+                    fitted=f"{fitted:%d.%m.%Y %H:%M %Z}" if fitted is not None else "—",
+                    actual=f"{actual:%d.%m.%Y %H:%M %Z}" if actual is not None else "—",
                 )
                 st.markdown(f"<div class='refit-note'>{html.escape(status_text)}</div>",
                             unsafe_allow_html=True)
+                if status.get("forecast_status") == "weather_unavailable":
+                    st.warning(copy["offshore"]["weather_unavailable"].format(day=status["forecast_day"]))
+                elif status.get("forecast_status") == "deadline_missed":
+                    st.warning(copy["offshore"]["deadline_missed"].format(day=status["forecast_day"]))
+                elif status.get("forecast_status") in {"model_unavailable", "fit_failed"}:
+                    st.warning(copy["offshore"]["model_unavailable"].format(day=status["forecast_day"]))
+                elif status.get("fit_mode") == "reused":
+                    key = ("model_reused_generation" if status.get("training_data_status") == "ENTSO-E generation incomplete"
+                           else "model_reused_other")
+                    st.info(copy["offshore"][key].format(
+                        age=status["model_age_days"], day=status["forecast_day"]))
+                log_path = PROJECT_ROOT / "dashboard_data/run_logs" / f"{updated.date()}.json"
+                if log_path.exists():
+                    with st.expander(copy["offshore"]["run_log_label"]):
+                        st.json(json.loads(log_path.read_text(encoding="utf-8")))
             except (KeyError, ValueError, TypeError):
                 st.warning(copy["offshore"]["status_unavailable"])
         else:

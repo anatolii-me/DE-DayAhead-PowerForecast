@@ -209,7 +209,7 @@ def load_dashboard_predictions(paths: DashboardPaths) -> pd.DataFrame:
     actual_dataset = _load_actual_dataset(paths.actual_dataset)
     # Keep the ENTSO-E actual curve visible even on days where an ECMWF run
     # could not be scored. Those intervals have no model prediction or metric.
-    observed = actual_dataset.loc[predictions.index.min():predictions.index.max()]
+    observed = actual_dataset.loc[predictions.index.min():]
     observed = observed.loc[
         np.isfinite(observed[["capacity", "capacity_factor", "gen_wind_off_act"]]).all(axis=1)
         & observed.capacity.gt(0)
@@ -322,15 +322,35 @@ def load_forward_predictions(
             raise DashboardDataError(f"Forward forecast has invalid {column} metadata.")
         metadata[column] = parsed.iloc[0]
         frame[column] = parsed
-    cutoff = (target_day - pd.DateOffset(days=1)).tz_convert("UTC")
-    start = (target_day - pd.DateOffset(days=366)).tz_convert("UTC")
+    mode = str(frame.fit_mode.iloc[0]) if "fit_mode" in frame else "fresh"
+    if mode not in {"fresh", "reused"} or ("fit_mode" in frame and not frame.fit_mode.eq(mode).all()):
+        raise DashboardDataError("Forward forecast has invalid model reuse metadata.")
+    issued_at = metadata["fitted_at_utc"]
+    if "issued_at_utc" in frame:
+        parsed_issue = pd.to_datetime(frame.issued_at_utc, utc=True, errors="coerce")
+        if parsed_issue.isna().any() or parsed_issue.nunique() != 1:
+            raise DashboardDataError("Forward forecast has invalid issue time.")
+        issued_at = parsed_issue.iloc[0]
+        frame["issued_at_utc"] = parsed_issue
+    fitted_day = metadata["fitted_at_utc"].tz_convert(BERLIN_TIMEZONE).normalize()
+    cutoff = fitted_day.tz_convert("UTC")
+    start = (fitted_day - pd.DateOffset(days=365)).tz_convert("UTC")
     if metadata["training_start_utc"] != start or metadata["training_end_exclusive_utc"] != cutoff:
         raise DashboardDataError("Forward forecast training window is not the notebook-6 365-day window.")
-    if metadata["fitted_at_utc"].tz_convert(BERLIN_TIMEZONE).normalize() != target_day - pd.DateOffset(days=1):
-        raise DashboardDataError("Forward forecast was not refitted on D-1.")
-    gate_closure = target_day - pd.DateOffset(days=1) + pd.Timedelta(hours=12)
-    if metadata["fitted_at_utc"].tz_convert(BERLIN_TIMEZONE) >= gate_closure:
-        raise DashboardDataError("The forward forecast was fitted after the day-ahead auction gate closed.")
+    issue_day = target_day - pd.DateOffset(days=1)
+    if issued_at.tz_convert(BERLIN_TIMEZONE).normalize() != issue_day:
+        raise DashboardDataError("Forward forecast was not issued on D-1.")
+    if (mode == "fresh" and fitted_day != issue_day) or (mode == "reused" and fitted_day >= issue_day):
+        raise DashboardDataError("Forward forecast has inconsistent model age.")
+    if "model_age_days" in frame and not frame.model_age_days.eq((issue_day - fitted_day).days).all():
+        raise DashboardDataError("Forward forecast model age is inconsistent.")
+    gate_closure = ((target_day - pd.DateOffset(days=1)).tz_localize(None)
+                    + pd.Timedelta(hours=12)).tz_localize(BERLIN_TIMEZONE)
+    if issued_at.tz_convert(BERLIN_TIMEZONE) >= gate_closure:
+        raise DashboardDataError("The forward forecast was issued after the day-ahead auction gate closed.")
+    if metadata["fitted_at_utc"] > issued_at or (mode == "fresh" and
+            metadata["fitted_at_utc"].tz_convert(BERLIN_TIMEZONE) >= gate_closure):
+        raise DashboardDataError("Forward forecast model fit time is inconsistent with issuance.")
     # The source run is at 00:00 UTC on D-1; local and UTC midnights differ.
     expected_run = (pd.Timestamp(target_day.date()) - pd.Timedelta(days=1)).tz_localize("UTC")
     if metadata["weather_run_utc"] != expected_run:

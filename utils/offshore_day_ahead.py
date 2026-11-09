@@ -8,13 +8,86 @@ model or present a scored holdout day as a live forecast.
 from __future__ import annotations
 
 import argparse
+import gzip
+import hashlib
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from utils.offshore_dashboard import BERLIN_TIMEZONE, DashboardDataError, DashboardPaths
+
+
+def current_weather(project_root: Path, run_day: pd.Timestamp, features: list[str]) -> pd.DataFrame:
+    """Return a complete midnight run, fetching it when the cache is incomplete."""
+    from utils.offshore_final_data import cached_weather_features, fetch_weather_with_fallback, grid, save_parquet
+
+    cache = project_root / "dashboard_data/source_cache"
+    raw_path = cache / "weather" / f"{run_day.date()}.parquet"
+    raw = pd.read_parquet(raw_path) if raw_path.exists() else None
+    try:
+        weather = cached_weather_features(raw, run_day, cache / "features") if raw is not None else None
+    except (ValueError, KeyError, AttributeError):
+        weather = None
+    if weather is None:
+        raw = fetch_weather_with_fallback(run_day)
+        if raw.empty:
+            raise DashboardDataError("The current ECMWF run is unavailable.")
+        save_parquet(raw, raw_path)
+        weather = cached_weather_features(raw, run_day, cache / "features")
+    targets = grid(run_day + pd.DateOffset(days=1))
+    if not weather.index.equals(targets) or not set(features).issubset(weather.columns):
+        raise DashboardDataError("The current ECMWF run is incomplete.")
+    if not np.isfinite(weather[features].to_numpy(dtype=float)).all():
+        raise DashboardDataError("The current ECMWF run has invalid features.")
+    deadline = (run_day + pd.Timedelta(hours=12)).tz_localize(BERLIN_TIMEZONE).tz_convert("UTC")
+    if not pd.to_datetime(weather.dt_run_utc, utc=True).lt(deadline).all():
+        raise DashboardDataError("The current ECMWF run is later than the feature deadline.")
+    return weather
+
+
+def _selection_hash(selection: dict) -> str:
+    identity = {key: selection[key] for key in ("best_by_model", "fit_protocol", "deployment_seed")}
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+
+
+def _save_model(model, metadata: dict, directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    temporary = directory / "latest.tmp.ubj.gz"
+    try:
+        raw = model.get_booster().save_raw(raw_format="ubj")
+        temporary.write_bytes(gzip.compress(raw))
+        os.replace(temporary, directory / "latest.ubj.gz")
+    finally:
+        temporary.unlink(missing_ok=True)
+    meta_tmp = directory / "metadata.tmp.json"
+    meta_tmp.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    os.replace(meta_tmp, directory / "metadata.json")
+
+
+def fit_model_snapshot(project_root: Path, dataset: pd.DataFrame,
+                       target_day: pd.Timestamp, selection: dict):
+    """Fit and persist the latest complete 365-day training window."""
+    from utils.offshore_final_evaluation import build_model, make_training_weights
+
+    features = selection["fit_protocol"]["features"]
+    config = selection["best_by_model"]["XGBoost"]
+    train, start_utc, end_utc, dropped_days = training_rows(dataset, target_day, features)
+    x_train = train[features].astype("float32")
+    y_train = train.capacity_factor.to_numpy(dtype=float)
+    model = build_model(config, selection["deployment_seed"])
+    model.fit(x_train, y_train, sample_weight=make_training_weights(y_train, config))
+    fitted_at = pd.Timestamp.now(tz="UTC")
+    metadata = {
+        "selection_hash": _selection_hash(selection), "features": features,
+        "fitted_at_utc": str(fitted_at), "training_start_utc": str(start_utc),
+        "training_end_exclusive_utc": str(end_utc), "train_rows": len(train),
+        "dropped_train_days": dropped_days,
+    }
+    _save_model(model, metadata, project_root / "dashboard_data/model")
+    return model, metadata
 
 
 def training_rows(
@@ -88,15 +161,18 @@ def capacity_for_targets(
 
 def issue_tomorrow_forecast(
     project_root: Path, *, dataset: pd.DataFrame | None = None,
+    weather: pd.DataFrame | None = None, reuse_model: bool = False, clock=None,
 ) -> Path:
-    """Fit the selected model once and atomically publish tomorrow's 15-minute CF/MW."""
-    from utils.offshore_final_data import (
-        cached_weather_features, fetch_weather_with_fallback, grid, save_parquet,
-    )
-    from utils.offshore_final_evaluation import build_model, make_training_weights
+    """Issue tomorrow's forecast after a fresh fit or from the last saved fit."""
+    from utils.offshore_final_data import grid, save_parquet
+    from utils.offshore_final_evaluation import build_model
 
-    now = pd.Timestamp.now(tz=BERLIN_TIMEZONE)
+    clock = clock or (lambda: pd.Timestamp.now(tz="UTC"))
+    now = clock().tz_convert(BERLIN_TIMEZONE)
     target_day = now.normalize() + pd.DateOffset(days=1)
+    gate_closure = (now.normalize().tz_localize(None) + pd.Timedelta(hours=12)).tz_localize(BERLIN_TIMEZONE)
+    if now >= gate_closure:
+        raise DashboardDataError("The day-ahead auction gate closed at 12:00 Europe/Berlin; no market-ready forecast was published.")
     run_day = target_day.tz_localize(None) - pd.DateOffset(days=1)
     paths = DashboardPaths.from_project_root(project_root)
     full_dataset_path = project_root / "results/offshore_final/actual_dataset_with_coverage.parquet"
@@ -113,23 +189,8 @@ def issue_tomorrow_forecast(
     dataset = pd.read_parquet(full_dataset_path) if dataset is None else dataset.copy()
     dataset.index = pd.DatetimeIndex(pd.to_datetime(dataset.index, utc=True))
     dataset = dataset.sort_index()
-    train, start_utc, end_utc, dropped_days = training_rows(
-        dataset, target_day, features,
-    )
-
     cache = project_root / "dashboard_data/source_cache"
-    raw_path = cache / "weather" / f"{run_day.date()}.parquet"
-    raw = pd.read_parquet(raw_path) if raw_path.exists() else None
-    try:
-        weather = cached_weather_features(raw, run_day, cache / "features") if raw is not None else None
-    except (ValueError, KeyError, AttributeError):
-        weather = None
-    if weather is None:
-        raw = fetch_weather_with_fallback(run_day)
-        if raw.empty:
-            raise DashboardDataError("The D-1 ECMWF weather run is unavailable.")
-        save_parquet(raw, raw_path)
-        weather = cached_weather_features(raw, run_day, cache / "features")
+    weather = current_weather(project_root, run_day, features) if weather is None else weather
     targets = grid(target_day.tz_localize(None))
     if not weather.index.equals(targets):
         raise DashboardDataError("The D-1 weather run does not cover every target interval.")
@@ -151,19 +212,41 @@ def issue_tomorrow_forecast(
     capacity_mw, effective_times = capacity_for_targets(
         pd.read_parquet(capacity_path), targets,
     )
-    x_train = train[features].astype("float32")
-    y_train = train.capacity_factor.to_numpy(dtype=float)
     model = build_model(config, selection["deployment_seed"])
-    model.fit(x_train, y_train, sample_weight=make_training_weights(y_train, config))
+    model_dir = project_root / "dashboard_data/model"
+    if reuse_model:
+        meta_path = model_dir / "metadata.json"
+        model_path = model_dir / "latest.ubj.gz"
+        if not meta_path.exists() or not model_path.exists():
+            raise DashboardDataError("No previously fitted model is available.")
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        if metadata.get("selection_hash") != _selection_hash(selection) or metadata.get("features") != features:
+            raise DashboardDataError("The saved model does not match the frozen selection.")
+        fitted_at = pd.Timestamp(metadata["fitted_at_utc"])
+        end_utc = pd.Timestamp(metadata["training_end_exclusive_utc"])
+        start_utc = pd.Timestamp(metadata["training_start_utc"])
+        age_days = (now.normalize() - fitted_at.tz_convert(BERLIN_TIMEZONE).normalize()).days
+        if age_days < 1 or end_utc >= (target_day - pd.DateOffset(days=1)).tz_convert("UTC"):
+            raise DashboardDataError("The saved model has invalid fallback provenance.")
+        model.load_model(bytearray(gzip.decompress(model_path.read_bytes())))
+        train_count = int(metadata["train_rows"])
+        dropped_days = metadata["dropped_train_days"]
+    else:
+        model, metadata = fit_model_snapshot(project_root, dataset, target_day, selection)
+        start_utc = pd.Timestamp(metadata["training_start_utc"])
+        end_utc = pd.Timestamp(metadata["training_end_exclusive_utc"])
+        dropped_days = metadata["dropped_train_days"]
+        fitted_at = pd.Timestamp(metadata["fitted_at_utc"])
+        train_count = metadata["train_rows"]
+        age_days = 0
     raw_prediction = np.asarray(model.predict(weather[features].astype("float32")))
     if not np.isfinite(raw_prediction).all():
         raise DashboardDataError("The model returned non-finite forecast values.")
     prediction = np.clip(raw_prediction, 0, 1)
-    fitted_at = pd.Timestamp.now(tz="UTC")
-    if fitted_at.tz_convert(BERLIN_TIMEZONE).normalize() != now.normalize():
-        raise DashboardDataError("The local issue day changed during the refit; rerun the forecast.")
-    gate_closure = now.normalize() + pd.Timedelta(hours=12)
-    if fitted_at.tz_convert(BERLIN_TIMEZONE) >= gate_closure:
+    issued_at = clock().tz_convert("UTC")
+    if issued_at.tz_convert(BERLIN_TIMEZONE).normalize() != now.normalize():
+        raise DashboardDataError("The local issue day changed; rerun the forecast.")
+    if issued_at.tz_convert(BERLIN_TIMEZONE) >= gate_closure:
         raise DashboardDataError("The day-ahead auction gate closed at 12:00 Europe/Berlin; no market-ready forecast was published.")
     output = pd.DataFrame({
         "target_time": targets.astype(str),
@@ -174,10 +257,13 @@ def issue_tomorrow_forecast(
         "model": "XGBoost",
         "loss": "l1",
         "fitted_at_utc": str(fitted_at),
+        "issued_at_utc": str(issued_at),
+        "fit_mode": "reused" if reuse_model else "fresh",
+        "model_age_days": age_days,
         "training_start_utc": str(start_utc),
         "training_end_exclusive_utc": str(end_utc),
         "weather_run_utc": str(run_day.tz_localize("UTC")),
-        "train_rows": len(train),
+        "train_rows": train_count,
         "dropped_train_days": ", ".join(dropped_days),
     })
     output_path = paths.forward_predictions

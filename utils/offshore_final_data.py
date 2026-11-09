@@ -49,6 +49,34 @@ def merge_generation(cached, fresh):
     return combined.loc[~combined.index.duplicated(keep='first')].sort_index()
 
 
+def fetch_generation_day(day, cached, cache_path):
+    """Refresh one local day without erasing valid cached intervals."""
+    from entsoe import EntsoePandasClient
+
+    key = os.getenv('ENTSOE_API_KEY')
+    if not key:
+        raise ValueError('Missing ENTSOE_API_KEY')
+    day = pd.Timestamp(day).normalize()
+    client = EntsoePandasClient(api_key=key, timeout=30, retry_count=2, retry_delay=2)
+    fresh = client.query_generation('DE_LU', start=day.tz_localize(TZ),
+        end=(day + pd.DateOffset(days=1)).tz_localize(TZ), psr_type='B18')
+    if isinstance(fresh, pd.DataFrame):
+        matches = [c for c in fresh.columns if 'Actual Aggregated' in str(c)]
+        if not matches:
+            matches = [c for c in fresh.columns if 'Wind Offshore' in str(c) and 'Consumption' not in str(c)]
+        if len(matches) != 1:
+            raise ValueError('Ambiguous offshore generation columns.')
+        fresh = fresh[matches[0]]
+    fresh.index = pd.to_datetime(fresh.index, utc=True)
+    fresh = fresh.loc[~fresh.index.duplicated(keep='last')].reindex(grid(day))
+    fresh = fresh.loc[np.isfinite(fresh) & fresh.ge(0)].to_frame('gen_wind_off_act')
+    if fresh.empty:
+        raise ValueError('No valid generation intervals were returned.')
+    merged = merge_generation(cached, fresh)
+    save_parquet(merged, cache_path)
+    return merged, len(fresh)
+
+
 def weather_features(raw, run_day):
     """Reject incomplete runs before regional means can hide missing points."""
     from utils.offshore_utils import SEA_POINTS

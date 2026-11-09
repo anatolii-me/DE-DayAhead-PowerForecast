@@ -6,21 +6,82 @@ import argparse
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from utils.offshore_dashboard import DashboardDataError
-from utils.offshore_day_ahead import issue_tomorrow_forecast, training_rows
+from utils.offshore_day_ahead import current_weather, fit_model_snapshot, issue_tomorrow_forecast, training_rows
 from utils.offshore_final_data import (
-    FIRST_NEW_DAY, assemble_dataset, grid, refresh_sources, save_parquet,
+    FIRST_NEW_DAY, assemble_dataset, fetch_generation_day, grid, refresh_sources, save_parquet,
 )
 
 PUBLIC = Path("dashboard_data")
 ORIGINAL = Path(
     "data/datasets/offshore_dataset_15m_interpolated_14_points_proxy_2024-03-14_to_2026-06-11.parquet"
 )
+RETRY_MINUTES = 15
+CUTOFF_HOUR = 11
+CUTOFF_MINUTE = 15
+
+
+def _write_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def _generation_complete(generation: pd.DataFrame, day: pd.Timestamp) -> bool:
+    values = generation.gen_wind_off_act.reindex(grid(day))
+    return bool(np.isfinite(values).all() and values.ge(0).all())
+
+
+def wait_for_critical_sources(root: Path, generation: pd.DataFrame, end_day: pd.Timestamp,
+                              features: list[str], log: dict, *, clock=None, sleep=None):
+    """Retry D-2 actuals and today's weather independently up to 11:15 Berlin."""
+    clock = clock or (lambda: pd.Timestamp.now(tz="Europe/Berlin"))
+    sleep = sleep or time.sleep
+    today = clock().tz_convert("Europe/Berlin").normalize()
+    deadline = (today.tz_localize(None) + pd.Timedelta(
+        hours=CUTOFF_HOUR, minutes=CUTOFF_MINUTE)).tz_localize("Europe/Berlin")
+    weather = None
+    generation_ready = _generation_complete(generation, end_day)
+    retry_generation = bool(os.getenv("ENTSOE_API_KEY"))
+    attempts = log.setdefault("attempts", [])
+    while True:
+        now = clock().tz_convert("Europe/Berlin")
+        if now >= deadline:
+            break
+        if not generation_ready and retry_generation:
+            try:
+                generation, count = fetch_generation_day(
+                    end_day, generation, root / PUBLIC / "source_cache/generation.parquet")
+                generation_ready = _generation_complete(generation, end_day)
+                outcome = f"received {count}/{len(grid(end_day))}; complete={generation_ready}"
+            except Exception as exc:
+                outcome = type(exc).__name__
+            attempts.append({"source": "ENTSO-E generation", "at_utc": str(now.tz_convert("UTC")),
+                             "outcome": outcome})
+            print(f"D-2 generation retry: {outcome}")
+        if weather is None:
+            try:
+                weather = current_weather(root, today.tz_localize(None), features)
+                outcome = "complete"
+            except Exception as exc:
+                outcome = type(exc).__name__
+            attempts.append({"source": "ECMWF midnight run", "at_utc": str(now.tz_convert("UTC")),
+                             "outcome": outcome})
+            print(f"Current weather retry: {outcome}")
+        if (generation_ready or not retry_generation) and weather is not None:
+            break
+        remaining = (deadline - clock().tz_convert("Europe/Berlin")).total_seconds()
+        if remaining <= 0:
+            break
+        sleep(min(RETRY_MINUTES * 60, remaining))
+    return generation, weather, generation_ready
 
 
 def extend_backtest(root: Path, dataset: pd.DataFrame, coverage: pd.DataFrame,
@@ -102,17 +163,25 @@ def run(root: Path, *, update: bool = True) -> None:
     today = pd.Timestamp.now(tz="Europe/Berlin").tz_localize(None).normalize()
     # Issue day is D-1. The last training and displayed actual day is D-2.
     end_day = today - pd.DateOffset(days=1)
+    target_day = today + pd.DateOffset(days=1)
+    log = {"issue_day": str(today.date()), "forecast_day": str(target_day.date()),
+           "started_at_utc": str(pd.Timestamp.now(tz="UTC")),
+           "retry_minutes": RETRY_MINUTES, "cutoff_local": f"{CUTOFF_HOUR:02}:{CUTOFF_MINUTE:02} Europe/Berlin",
+           "attempts": []}
     weather, generation, capacity, events, _ = refresh_sources(
         root, end_day=end_day, update=update, revision_days=7,
     )
     features = selection["fit_protocol"]["features"]
+    current_run = None
+    generation_ready = _generation_complete(generation, end_day)
+    if update:
+        generation, current_run, generation_ready = wait_for_critical_sources(
+            root, generation, end_day, features, log)
     dataset, coverage = assemble_dataset(
         original, weather, generation, capacity, end_day, features,
         source_events=events,
     )
     latest = coverage.loc[end_day]
-    if not latest.row_complete:
-        raise DashboardDataError(f"D-2 ({end_day.date()}) is incomplete: {latest.reason}")
     extend_backtest(root, dataset, coverage, selection)
     actual = dataset[["capacity", "capacity_factor", "gen_wind_off_act"]]
     save_parquet(actual, public / "actual_dataset.parquet")
@@ -120,17 +189,60 @@ def run(root: Path, *, update: bool = True) -> None:
     if not events.empty:
         events.drop(columns=["detail"], errors="ignore").to_csv(public / "source_events.csv", index=False)
     if update:
-        issued = issue_tomorrow_forecast(root, dataset=dataset)
-        forward = pd.read_parquet(issued)
-        target_day = pd.Timestamp(forward.target_time.iloc[0]).tz_convert("Europe/Berlin").date()
-        save_parquet(forward, public / "issued" / f"{target_day}.parquet")
+        training_issue = None
+        if bool(latest.row_complete):
+            try:
+                training_rows(dataset, target_day, features)
+            except DashboardDataError as exc:
+                training_issue = str(exc)
+        mode = "fresh" if bool(latest.row_complete) and training_issue is None else "reused"
+        forecast_state = "issued"
+        failure_reason = None
+        forward = None
+        if current_run is None:
+            attempted_weather = any(item["source"] == "ECMWF midnight run" for item in log["attempts"])
+            forecast_state = "weather_unavailable" if attempted_weather else "deadline_missed"
+            failure_reason = ("The current ECMWF midnight run remained unavailable by 11:15 Europe/Berlin."
+                              if attempted_weather else "The scheduled job reached the 11:15 Europe/Berlin cutoff before source polling.")
+        else:
+            try:
+                issued = issue_tomorrow_forecast(
+                    root, dataset=dataset, weather=current_run, reuse_model=(mode == "reused"))
+                forward = pd.read_parquet(issued)
+                save_parquet(forward, public / "issued" / f"{target_day.date()}.parquet")
+            except DashboardDataError as exc:
+                forecast_state = "model_unavailable" if mode == "reused" else "fit_failed"
+                failure_reason = str(exc)
+                print(f"Forecast withheld: {type(exc).__name__}: {failure_reason}")
+        actual_values = actual.gen_wind_off_act.dropna()
+        actual_time = str(actual_values.index.max()) if not actual_values.empty else None
+        model_meta_path = public / "model/metadata.json"
+        model_meta = json.loads(model_meta_path.read_text(encoding="utf-8")) if model_meta_path.exists() else {}
         status = {
             "last_updated_utc": str(pd.Timestamp.now(tz="UTC")),
-            "fitted_at_utc": str(forward.fitted_at_utc.iloc[0]),
-            "latest_actual_utc": str(grid(end_day)[-1]),
-            "forecast_day": str(target_day),
+            "fitted_at_utc": model_meta.get("fitted_at_utc"),
+            "latest_actual_utc": actual_time,
+            "forecast_day": str(target_day.date()),
+            "forecast_status": forecast_state,
+            "fit_mode": mode if forward is not None else None,
+            "model_age_days": int(forward.model_age_days.iloc[0]) if forward is not None else None,
+            "training_data_status": (
+                training_issue if training_issue is not None else
+                "complete" if bool(latest.row_complete) else
+                "ENTSO-E generation incomplete" if not generation_ready else f"D-2 incomplete: {latest.reason}"),
+            "failure_reason": failure_reason,
         }
-        (public / "status.json").write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
+        _write_json(public / "status.json", status)
+        log.update({"completed_at_utc": status["last_updated_utc"],
+                    "result": forecast_state, "fit_mode": status["fit_mode"],
+                    "training_data_status": status["training_data_status"],
+                    "model_fitted_at_utc": status["fitted_at_utc"],
+                    "training_start_utc": model_meta.get("training_start_utc"),
+                    "training_end_exclusive_utc": model_meta.get("training_end_exclusive_utc"),
+                    "train_rows": model_meta.get("train_rows"),
+                    "dropped_train_days": model_meta.get("dropped_train_days"),
+                    "failure_reason": failure_reason})
+        _write_json(public / "run_logs" / f"{today.date()}.json", log)
     key = os.getenv("ENTSOE_API_KEY", "")
     if key:
         secret = key.encode("utf-8")
@@ -140,15 +252,40 @@ def run(root: Path, *, update: bool = True) -> None:
     print(f"Complete source days: {int(coverage.row_complete.sum())}/{len(coverage)}; latest {end_day.date()}")
 
 
+def bootstrap_model(root: Path) -> None:
+    """Create an initial saved model from existing complete cached data."""
+    root = root.resolve()
+    public = root / PUBLIC
+    selection = json.loads((public / "frozen_selection.json").read_text(encoding="utf-8"))
+    original_path = root / ORIGINAL
+    if hashlib.sha256(original_path.read_bytes()).hexdigest() != selection["dataset_hash"]:
+        raise DashboardDataError("The original dataset differs from the frozen model selection.")
+    today = pd.Timestamp.now(tz="Europe/Berlin").tz_localize(None).normalize()
+    end_day = today - pd.DateOffset(days=1)
+    weather, generation, capacity, events, _ = refresh_sources(
+        root, end_day=end_day, update=False)
+    dataset, coverage = assemble_dataset(
+        pd.read_parquet(original_path), weather, generation, capacity, end_day,
+        selection["fit_protocol"]["features"], source_events=events)
+    if not bool(coverage.loc[end_day].row_complete):
+        raise DashboardDataError(f"Cannot bootstrap: {end_day.date()} is incomplete.")
+    _, metadata = fit_model_snapshot(root, dataset, today + pd.DateOffset(days=1), selection)
+    print(f"Bootstrapped model fitted at {metadata['fitted_at_utc']}; training ends {metadata['training_end_exclusive_utc']}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--offline", action="store_true", help="Use cached sources and do not issue a forward forecast")
+    parser.add_argument("--bootstrap-model", action="store_true", help="Fit the initial reusable model from cached data")
     args = parser.parse_args()
     from dotenv import load_dotenv
 
     load_dotenv(args.project_root / ".env", override=False)
-    run(args.project_root, update=not args.offline)
+    if args.bootstrap_model:
+        bootstrap_model(args.project_root)
+    else:
+        run(args.project_root, update=not args.offline)
 
 
 if __name__ == "__main__":

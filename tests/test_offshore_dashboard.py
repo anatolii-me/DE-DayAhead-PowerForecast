@@ -195,6 +195,22 @@ class OffshoreDashboardTests(unittest.TestCase):
             self.assertIsNone(load_forward_predictions(
                 paths, now=pd.Timestamp("2026-01-22 10:00", tz="Europe/Berlin")
             ))
+            reused = frame.copy()
+            reused["fit_mode"] = "reused"
+            reused["model_age_days"] = 1
+            reused["issued_at_utc"] = "2026-01-19 09:30:00+00:00"
+            reused["fitted_at_utc"] = "2026-01-18 09:30:00+00:00"
+            previous_fit_day = day - pd.DateOffset(days=2)
+            reused["training_start_utc"] = str((previous_fit_day - pd.DateOffset(days=365)).tz_convert("UTC"))
+            reused["training_end_exclusive_utc"] = str(previous_fit_day.tz_convert("UTC"))
+            reused.to_parquet(path)
+            self.assertEqual(load_forward_predictions(
+                paths, now=pd.Timestamp("2026-01-19 11:00", tz="Europe/Berlin")
+            ).fit_mode.iloc[0], "reused")
+            reused["model_age_days"] = 0
+            reused.to_parquet(path)
+            with self.assertRaises(DashboardDataError):
+                load_forward_predictions(paths, now=pd.Timestamp("2026-01-19 11:00", tz="Europe/Berlin"))
             late = frame.copy()
             late["fitted_at_utc"] = "2026-01-19 12:30:00+00:00"
             late.to_parquet(path)
