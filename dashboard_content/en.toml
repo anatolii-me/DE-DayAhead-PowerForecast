@@ -7,9 +7,9 @@ theme = "Dark mode"
 
 [hero]
 title = "Day-Ahead Forecasting for the German Energy Market"
-bio = "Accurate day-ahead forecasts for the Germany-Luxembourg (DE_LU) region, covering offshore wind, onshore wind and solar generation, total grid load and, in the future, electricity prices."
+bio = "Day-ahead forecasts for the Germany-Luxembourg (DE_LU) region, starting with offshore wind generation. Other generation, load and price models are planned."
 update_label = "Updated Daily"
-update_text = "In this implementation, machine learning models are retrained daily on the latest available data to improve forecasts for the next day. See the **General Info** tab for more details."
+update_text = "The offshore forecast runs daily. The model is refitted when source data are complete; the status below shows any fallback or missing forecast. See **General Info** for details."
 byline = "Personal project by **Anatolii Matvieiev, M.Sc. in Computer Engineering**"
 
 [navigation]
@@ -87,7 +87,7 @@ The goal is to produce forecasts using information available before the delivery
 
 ## How the offshore forecast works
 
-Each day, an XGBoost model is refitted on a 365-day training window ending two days before delivery. For delivery day D, it uses one ECMWF weather forecast issued at **00:00 UTC on D−1**, sampled at 14 locations across the North Sea and Baltic Sea. Actual offshore generation is queried from ENTSO-E for the `DE_LU` area; monthly installed offshore capacity comes from Energy-Charts for Germany.
+Normally, an XGBoost model is refitted daily on a 365-day training window ending two days before delivery. If training data remain incomplete, the forecast uses the latest saved fit and shows its age. Without the current weather run, no new forecast is issued. For delivery day D, it uses one ECMWF weather forecast issued at **00:00 UTC on D−1**, sampled at 14 locations across the North Sea and Baltic Sea. Actual offshore generation is queried from ENTSO-E for the `DE_LU` area; monthly installed offshore capacity comes from Energy-Charts for Germany.
 
 The model first predicts *capacity factor* — the share of installed offshore capacity expected to generate electricity. This is converted to megawatts (MW) for the chart. Hourly weather forecasts are interpolated onto the 15-minute delivery grid; the extra time points do not add weather detail absent from the original forecast.
 

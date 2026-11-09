@@ -6,9 +6,9 @@ theme = "Dunkel"
 
 [hero]
 title = "Day-Ahead-Prognosen für den deutschen Energiemarkt"
-bio = "Präzise Day-Ahead-Prognosen für die Region Deutschland-Luxemburg (DE_LU): Offshore- und Onshore-Windenergie, Solarstrom, Netzlast und künftig auch Strompreise."
+bio = "Day-Ahead-Prognosen für Deutschland-Luxemburg (DE_LU), zunächst für Offshore-Windenergie. Weitere Modelle für Erzeugung, Last und Preise sind geplant."
 update_label = "Täglich aktualisiert"
-update_text = "In diesem Projekt werden die Modelle täglich mit den neuesten verfügbaren Daten neu trainiert, um die Prognose für den Folgetag zu verbessern. Weitere Informationen stehen unter **Allgemeine Informationen**."
+update_text = "Die Offshore-Prognose läuft täglich. Bei vollständigen Quelldaten wird das Modell neu trainiert; der Status unten zeigt Ersatzmodelle oder ausgefallene Prognosen. Mehr unter **Allgemeine Informationen**."
 byline = "Persönliches Projekt von **Anatolii Matvieiev, M.Sc. in Computer Engineering**"
 
 [navigation]
@@ -86,7 +86,7 @@ Ziel sind Prognosen mit Informationen, die vor dem Liefertag verfügbar waren. U
 
 ## So entsteht die Offshore-Prognose
 
-Ein XGBoost-Modell wird täglich mit einem 365-Tage-Trainingsfenster neu trainiert, das zwei Tage vor dem Liefertag endet. Für Liefertag D nutzt es einen ECMWF-Wetterlauf von **00:00 Uhr UTC am Vortag (D−1)** für 14 Standorte in Nord- und Ostsee. Die gemessene Offshore-Erzeugung wird bei ENTSO-E für das Gebiet `DE_LU` abgefragt; die monatliche installierte Offshore-Leistung stammt von Energy-Charts für Deutschland.
+Normalerweise wird ein XGBoost-Modell täglich mit einem 365-Tage-Trainingsfenster neu trainiert, das zwei Tage vor dem Liefertag endet. Bleiben Trainingsdaten unvollständig, nutzt die Prognose das zuletzt gespeicherte Modell und zeigt dessen Alter an. Ohne den aktuellen Wetterlauf wird keine neue Prognose veröffentlicht. Für Liefertag D nutzt es einen ECMWF-Wetterlauf von **00:00 Uhr UTC am Vortag (D−1)** für 14 Standorte in Nord- und Ostsee. Die gemessene Offshore-Erzeugung wird bei ENTSO-E für das Gebiet `DE_LU` abgefragt; die monatliche installierte Offshore-Leistung stammt von Energy-Charts für Deutschland.
 
 Zunächst prognostiziert das Modell den *Kapazitätsfaktor* — den Anteil der installierten Offshore-Leistung, der voraussichtlich Strom erzeugt. Für die Darstellung wird das Ergebnis in Megawatt (MW) umgerechnet. Die stündlichen Wetterwerte werden auf das 15-Minuten-Raster übertragen. Dadurch entstehen passende Zeitpunkte, aber keine zusätzlichen Informationen über das Wetter zwischen zwei Vorhersagestunden.
 
