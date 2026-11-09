@@ -1,0 +1,74 @@
+# Texte hier bearbeiten. Markdown funktioniert in Einleitung und Abschnitten.
+
+[controls]
+language = "Sprache"
+theme = "Dunkel"
+
+[hero]
+title = "Day-Ahead-Prognosen für den deutschen Energiemarkt"
+bio = "Präzise Day-Ahead-Prognosen für die Region Deutschland-Luxemburg (DE_LU): Offshore- und Onshore-Windenergie, Solarstrom, Netzlast und künftig auch Strompreise."
+update_label = "Täglich aktualisiert"
+update_text = "In diesem Projekt werden die Modelle täglich mit den neuesten verfügbaren Daten neu trainiert, um die Prognose für den Folgetag zu verbessern. Weitere Informationen stehen unter **Allgemeine Informationen**."
+byline = "Persönliches Projekt von **Anatolii Matvieiev, M.Sc. in Computer Engineering**"
+
+[navigation]
+forecasting = "Day-Ahead-Prognosen"
+general_info = "Allgemeine Informationen"
+use_case = "Anwendungsbeispiel"
+
+[forecasting]
+intro = "Hier können Sie Modellprognosen mit der tatsächlichen Erzeugung vergleichen. Weitere Prognosemodelle werden ergänzt, sobald sie verfügbar sind."
+offshore = "Offshore-Windenergie"
+onshore = "Onshore-Windenergie"
+solar = "Solarenergie"
+load = "Netzlast"
+prices = "Day-Ahead-Preise"
+coming_soon = "Prognosemodell in Entwicklung."
+
+[offshore]
+accuracy_prefix = "Das Offshore-Windmodell erreicht"
+accuracy_suffix = "Genauigkeit im letzten Jahr"
+accuracy_note = "Hier definiert als 100 % minus nMAE über die letzten 365 Liefertage. nMAE ist der mittlere absolute Fehler des Kapazitätsfaktors; dieser Prozentwert ist eine vereinfachte Kennzahl und keine Garantie für einzelne Prognosen."
+chart_title = "Offshore-Windenergie · Day-Ahead-Prognose und Ist-Werte"
+chart_y_axis = "Erzeugung (MW)"
+chart_actual = "Tatsächliche Erzeugung"
+chart_forecast = "Prognose · XGBoost HPO"
+chart_actual_hover = "Ist-Wert"
+chart_forecast_hover = "Prognose"
+chart_forward = "Day-Ahead-Prognose · Ist-Wert ausstehend"
+chart_forward_hover = "Prognose · Ist-Wert ausstehend"
+chart_help = "Ziehen Sie im Diagramm, um zu zoomen. Mit dem Regler darunter navigieren Sie durch die Prognosehistorie; ein Doppelklick setzt die Ansicht zurück. Lieferzeiten gelten für Europe/Berlin; die Erzeugung wird in MW angegeben."
+forward_unavailable = "Eine aktuelle Day-Ahead-Prognose wurde noch nicht veröffentlicht. Das Diagramm zeigt nur bereits bewertete Prognosen und verlängert keine alte Prognose künstlich bis morgen."
+shading_note = "Hellgrau markiert D−1: An diesem Tag wird das Modell mit Daten bis D−2, 23:45 Uhr Ortszeit neu trainiert. Dunkleres Grau markiert den Liefertag D; die Ist-Erzeugung steht noch aus."
+refit_label = "Letztes Modell-Refit"
+dropped_days_label = "Unvollständige Tage vom Training ausgeschlossen"
+training_range_label = "Trainingsdaten"
+forecast_day_label = "Prognosetag"
+metrics_title = "Modellgüte im Überblick"
+metrics_note = "Letztes Jahr umfasst die letzten 365 lokalen Liefertage; die gesamte Historie beginnt nach dem ersten 365-tägigen Trainingsfenster. Der Skill Score vergleicht das Modell mit einer Wochen-Baseline. Für eine kurze Erklärung den Mauszeiger über ein ?-Symbol bewegen oder es fokussieren."
+disclaimer = "Diese Prognose basiert auf Wettervorhersagen. Abregelungen, Ausfälle oder Wartung einzelner Windparks, Netzengpässe, Übertragungsbeschränkungen und andere betriebliche Eingriffe werden nicht ausdrücklich modelliert. Unter solchen Bedingungen kann die tatsächliche Erzeugung deutlich von der Prognose abweichen."
+
+[metrics]
+nmae = "nMAE"
+nmae_help = "Mittlerer absoluter Prognosefehler auf der Kapazitätsfaktor-Skala (0–1). Niedriger ist besser. Da der Kapazitätsfaktor bereits normiert ist, entspricht dies dem gewöhnlichen MAE."
+nrmse = "nRMSE"
+nrmse_help = "Quadratischer mittlerer Fehler auf der Kapazitätsfaktor-Skala (0–1). Große Abweichungen zählen stärker als beim nMAE; niedriger ist besser."
+r2 = "R²"
+r2_help = "Anteil der Variation des beobachteten Kapazitätsfaktors, den die Prognose erklärt: 1 − quadrierter Modellfehler / quadrierte Abweichung vom Mittelwert. Höher ist besser; negative Werte sind möglich."
+skill = "Skill Score"
+skill_help = "1 − Modell-MAE / MAE der Wochen-Baseline, jeweils in MW und auf identischen Intervallen. Positive Werte bedeuten eine Verbesserung gegenüber dem tatsächlichen Kapazitätsfaktor zur gleichen lokalen Viertelstunde sieben Tage zuvor, skaliert auf die aktuelle installierte Leistung."
+mae_mw = "MAE (MW)"
+mae_mw_help = "Mittlerer absoluter Unterschied zwischen prognostizierter und tatsächlicher Offshore-Erzeugung in MW. Niedriger ist besser."
+p90_mw = "P90-Fehler (MW)"
+p90_mw_help = "90. Perzentil des absoluten Fehlers in MW. In neun von zehn bewerteten 15-Minuten-Intervallen liegt der Fehler höchstens bei diesem Wert. Niedriger ist besser."
+
+[windows]
+last_year = "Letztes Jahr"
+all_history = "Gesamte Historie"
+
+[general_info]
+body = ""
+
+[use_case]
+title = "Von Prognosen zu Batterieentscheidungen"
+body = "Sobald die vollständige Prognosepipeline einschließlich Strompreisen bereitsteht, wird hier ein praktisches Beispiel ergänzt. Es zeigt, wie die Prognosen die Lade- und Entladeplanung eines Batteriespeichers (BESS) unterstützen und welchen wirtschaftlichen Nutzen die Pipeline bieten kann."

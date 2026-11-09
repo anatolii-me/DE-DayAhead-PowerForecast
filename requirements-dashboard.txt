@@ -1,0 +1,7 @@
+# Minimal runtime for the interactive dashboard and its GitHub Actions checks.
+# The model-training environment remains pinned in requirements-offshore-final.txt.
+numpy==2.4.4
+pandas==3.0.2
+pyarrow==23.0.1
+plotly==6.8.0
+streamlit==1.65.0

@@ -1,0 +1,22 @@
+# Environment
+.venv/
+**/__pycache__/
+*.pyc
+cache.sqlite
+.cache.sqlite*
+check.html
+.env
+.env.*
+!.env.example
+
+# Drafts, Caches, and Debugging
+catboost_info/
+entsoe_cache/
+*.html
+drafts/
+
+# Debugging and testing notebooks
+entsoe_point_in_time_check.ipynb
+utils/test_entsoe_fetcher.ipynb
+results/
+tests/

@@ -1,0 +1,76 @@
+# Edit the text here. Markdown works in the hero and section paragraphs.
+# The layout grows with the content; no fixed-height text boxes are used.
+
+[controls]
+language = "Language"
+theme = "Dark mode"
+
+[hero]
+title = "Day-Ahead Forecasting for the German Energy Market"
+bio = "Accurate day-ahead forecasts for the Germany-Luxembourg (DE_LU) region, covering offshore wind, onshore wind and solar generation, total grid load and, in the future, electricity prices."
+update_label = "Updated Daily"
+update_text = "In this implementation, machine learning models are retrained daily on the latest available data to improve forecasts for the next day. See the **General Info** tab for more details."
+byline = "Personal project by **Anatolii Matvieiev, M.Sc. in Computer Engineering**"
+
+[navigation]
+forecasting = "Day-Ahead Forecasting"
+general_info = "General Info"
+use_case = "Use Case"
+
+[forecasting]
+intro = "Explore the model forecasts and compare them with observed generation. New forecast models will appear here as they become available."
+offshore = "Offshore Wind Generation"
+onshore = "Onshore Wind Generation"
+solar = "Solar Generation"
+load = "Load"
+prices = "Day-Ahead Prices"
+coming_soon = "Forecast model in development."
+
+[offshore]
+accuracy_prefix = "The offshore wind model reaches"
+accuracy_suffix = "accuracy over the last year"
+accuracy_note = "Defined here as 100% minus nMAE over the last 365 delivery days. nMAE is the mean absolute capacity-factor error; this percentage is a simple summary, not a guarantee for any single forecast."
+chart_title = "Offshore wind generation · day-ahead forecast vs actual"
+chart_y_axis = "Generation (MW)"
+chart_actual = "Actual generation"
+chart_forecast = "Forecast · XGBoost HPO"
+chart_actual_hover = "Actual"
+chart_forecast_hover = "Forecast"
+chart_forward = "Day-ahead forecast · actual pending"
+chart_forward_hover = "Forecast · actual pending"
+chart_help = "Drag on the chart to zoom. Use the slider below it to move through the forecast history; double-click to reset the view. Delivery times use Europe/Berlin; generation is shown in MW."
+forward_unavailable = "No current day-ahead forecast has been published yet. The chart shows evaluated history only; it does not extend an old forecast into tomorrow."
+shading_note = "Light grey marks D−1, when the model is refitted using data through D−2 23:45 local time. Darker grey marks delivery day D; actual generation is still pending."
+refit_label = "Last model refit"
+dropped_days_label = "Incomplete days excluded from training"
+training_range_label = "Training data"
+forecast_day_label = "Forecast day"
+metrics_title = "Performance at a glance"
+metrics_note = "Last year means the latest 365 local delivery days; all history starts after the model’s initial 365-day training window. Skill score compares the model with a weekly persistence baseline. Hover over or focus a ? icon for a short explanation."
+disclaimer = "This is a weather-driven generation forecast. It does not explicitly model curtailment, individual wind-farm outages or maintenance, grid congestion, transmission constraints, or other operational interventions. Observed output can therefore diverge from the forecast, especially when such conditions occur."
+
+[metrics]
+nmae = "nMAE"
+nmae_help = "Mean absolute forecast error on the capacity-factor scale (0–1). Lower is better. Since capacity factor is already normalised, this equals ordinary MAE."
+nrmse = "nRMSE"
+nrmse_help = "Root mean squared error on the capacity-factor scale (0–1). Larger misses count more than in nMAE; lower is better."
+r2 = "R²"
+r2_help = "The share of observed capacity-factor variation explained by the forecast: 1 − squared model error / squared deviation from the mean. Higher is better; negative values are possible."
+skill = "Skill score"
+skill_help = "1 − model MAE / weekly-baseline MAE, both in MW on matched intervals. Positive means better than the actual capacity factor from the same local quarter-hour seven days earlier, scaled to current installed capacity."
+mae_mw = "MAE (MW)"
+mae_mw_help = "Mean absolute difference between forecast and actual offshore generation in MW. Lower is better and directly reflects typical power error."
+p90_mw = "P90 error (MW)"
+p90_mw_help = "90th percentile of the absolute forecast error in MW. Nine out of ten evaluated 15-minute intervals have an error at or below this value. Lower is better."
+
+[windows]
+last_year = "Last year"
+all_history = "All history"
+
+[general_info]
+# Add Markdown here when you are ready. See README for an example.
+body = ""
+
+[use_case]
+title = "From forecasts to battery decisions"
+body = "A practical example is coming when the full forecasting pipeline, including electricity prices, is ready. It will show how the forecasts could support charge and discharge planning for a battery energy storage system (BESS) and illustrate the pipeline’s commercial value."

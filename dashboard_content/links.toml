@@ -1,0 +1,5 @@
+# Add, replace or remove profile URLs here. Leave a value empty to hide its link.
+[profiles]
+linkedin = "https://www.linkedin.com/in/anatolii-me/"
+xing = "https://www.xing.com/profile/Anatolii_Matvieiev/"
+github = "https://github.com/anatolii-me"
