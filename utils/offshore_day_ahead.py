@@ -86,18 +86,23 @@ def capacity_for_targets(
     return source.capacity_gw.to_numpy()[positions] * 1000.0, matched_times
 
 
-def issue_tomorrow_forecast(project_root: Path) -> Path:
+def issue_tomorrow_forecast(
+    project_root: Path, *, dataset: pd.DataFrame | None = None,
+) -> Path:
     """Fit the selected model once and atomically publish tomorrow's 15-minute CF/MW."""
-    from utils.offshore_final_data import cached_weather_features, grid, save_parquet
+    from utils.offshore_final_data import (
+        cached_weather_features, fetch_weather_with_fallback, grid, save_parquet,
+    )
     from utils.offshore_final_evaluation import build_model, make_training_weights
 
     now = pd.Timestamp.now(tz=BERLIN_TIMEZONE)
     target_day = now.normalize() + pd.DateOffset(days=1)
     run_day = target_day.tz_localize(None) - pd.DateOffset(days=1)
     paths = DashboardPaths.from_project_root(project_root)
-    if paths.actual_dataset is None or not paths.actual_dataset.exists():
-        raise DashboardDataError("The refreshed notebook-6 training dataset is missing.")
-    selection_path = paths.historical_predictions.parent.parent / "frozen_selection.json"
+    full_dataset_path = project_root / "results/offshore_final/actual_dataset_with_coverage.parquet"
+    if dataset is None and not full_dataset_path.exists():
+        raise DashboardDataError("The refreshed full training dataset is missing. Run utils.offshore_daily.")
+    selection_path = project_root / "dashboard_data/frozen_selection.json"
     if not selection_path.exists():
         raise DashboardDataError("The frozen notebook-6 model selection is missing.")
     selection = json.loads(selection_path.read_text(encoding="utf-8"))
@@ -105,24 +110,26 @@ def issue_tomorrow_forecast(project_root: Path) -> Path:
     if config["loss"] != "l1":
         raise DashboardDataError("The frozen production selection is not XGBoost L1.")
     features = selection["fit_protocol"]["features"]
-    dataset = pd.read_parquet(paths.actual_dataset)
+    dataset = pd.read_parquet(full_dataset_path) if dataset is None else dataset.copy()
     dataset.index = pd.DatetimeIndex(pd.to_datetime(dataset.index, utc=True))
     dataset = dataset.sort_index()
     train, start_utc, end_utc, dropped_days = training_rows(
         dataset, target_day, features,
     )
 
-    cache = project_root / "results/offshore_final/source_cache"
+    cache = project_root / "dashboard_data/source_cache"
     raw_path = cache / "weather" / f"{run_day.date()}.parquet"
-    if raw_path.exists():
-        raw = pd.read_parquet(raw_path)
-    else:
-        from utils.offshore_utils import fetch_offshore_weather
-        raw = fetch_offshore_weather(str(run_day.date()), str(run_day.date()))
+    raw = pd.read_parquet(raw_path) if raw_path.exists() else None
+    try:
+        weather = cached_weather_features(raw, run_day, cache / "features") if raw is not None else None
+    except (ValueError, KeyError, AttributeError):
+        weather = None
+    if weather is None:
+        raw = fetch_weather_with_fallback(run_day)
         if raw.empty:
             raise DashboardDataError("The D-1 ECMWF weather run is unavailable.")
         save_parquet(raw, raw_path)
-    weather = cached_weather_features(raw, run_day, cache / "features")
+        weather = cached_weather_features(raw, run_day, cache / "features")
     targets = grid(target_day.tz_localize(None))
     if not weather.index.equals(targets):
         raise DashboardDataError("The D-1 weather run does not cover every target interval.")
@@ -155,6 +162,9 @@ def issue_tomorrow_forecast(project_root: Path) -> Path:
     fitted_at = pd.Timestamp.now(tz="UTC")
     if fitted_at.tz_convert(BERLIN_TIMEZONE).normalize() != now.normalize():
         raise DashboardDataError("The local issue day changed during the refit; rerun the forecast.")
+    gate_closure = now.normalize() + pd.Timedelta(hours=12)
+    if fitted_at.tz_convert(BERLIN_TIMEZONE) >= gate_closure:
+        raise DashboardDataError("The day-ahead auction gate closed at 12:00 Europe/Berlin; no market-ready forecast was published.")
     output = pd.DataFrame({
         "target_time": targets.astype(str),
         "prediction": prediction,

@@ -19,4 +19,4 @@ drafts/
 entsoe_point_in_time_check.ipynb
 utils/test_entsoe_fetcher.ipynb
 results/
-tests/
+/dashboard_data/source_cache/features/

@@ -72,7 +72,7 @@ base Streamlit theme is in [`.streamlit/config.toml`](.streamlit/config.toml).
 
 ## Run locally
 
-Use Python 3.13 and run notebook 6 to produce the forecast artifacts. Then:
+Use Python 3.13. The repository contains a compact public artifact snapshot; then:
 
 ```powershell
 python -m pip install -r requirements-dashboard.txt
@@ -80,40 +80,49 @@ streamlit run dashboard.py
 ```
 
 The dashboard **reads** saved predictions; opening it does not retrain a model
-or fetch data. Notebook 6's rolling evaluation trains each target day's model
-on the most recent 365 calendar days ending at D-2. A manual forward-forecast
-command is available below; scheduling its source refresh and publication is
-the next operational step and is not part of the current dashboard checks.
+or fetch data. The daily pipeline trains each target day's model on the most
+recent 365 local calendar days ending at D-2 23:45 Europe/Berlin. DST delivery
+days have 92 or 100 quarter-hours, rather than 96.
 
 ### Publish a genuine forecast for tomorrow
 
-After refreshing notebook-6 source data through **D-2** and the monthly
-installed-capacity series, install the full model runtime and run on **D-1**:
+To refresh source data, extend the historical simulation, and issue a forecast
+for tomorrow, install the full model runtime and run on **D-1**:
 
 ```powershell
 python -m pip install -r requirements-offshore-final.txt
-python -m utils.offshore_day_ahead
+python -m utils.offshore_daily
 ```
 
-This uses the frozen XGBoost HPO L1 configuration, trains on the same 365 local
-calendar days as notebook 6 (ending at D-2 23:45), obtains the D-1 ECMWF run
-if it is not already cached, and writes
-`results/offshore_final/day_ahead_predictions.parquet`. It refuses to publish
-if D-2, weather, capacity or the target-day grid is incomplete. The dashboard
-will show only a **current** issued forecast; a missing or stale artifact is
-reported honestly rather than disguised as tomorrow's prediction. The
-forecast is not included in performance metrics until actuals are available
-and notebook 6 evaluates that day.
+The command retries missing source days, refreshes recent ENTSO-E revisions,
+recreates the feature dataset, and trains the frozen XGBoost HPO L1 model. It
+only publishes if D-2 and the target weather/capacity grid are complete. Public
+artifacts go to `dashboard_data/`; no API credential is stored there. Forecasts
+issued live are archived and remain unchanged when later actuals arrive.
+Historical simulation for earlier days uses the correct D-1 weather run and
+D-2 training cutoff, but historical source revisions are not point-in-time
+snapshots. Its metrics therefore describe a retrospective simulation, not a
+fully auditable live trading record.
 
-The current repository does **not** yet schedule this command or transport its
-artifact into a deployed dashboard. Those steps need a persistent artifact
-destination and a daily source-refresh job. A deployment can override the
-forecast path with `OFFSHORE_FORWARD_PREDICTIONS`.
+`.github/workflows/offshore-daily.yml` runs once daily at 07:15 UTC and can also
+be started manually. It uses the `ENTSOE_API_KEY` GitHub Actions secret, commits
+only `dashboard_data/` on success, and never writes the key to the dashboard.
+GitHub scheduled jobs can start late or be skipped, so check the displayed last
+successful update. A forecast fitted at or after the SDAC gate closure at
+12:00 Europe/Berlin is rejected. The dashboard shows a dashed line at the last actual
+interval (D-2 23:45 Europe/Berlin); D-1 actuals are withheld until the next
+model update.
+
+To publish the public URL, connect the repository to Streamlit Community Cloud
+and select `dashboard.py` on `main`. The root `requirements.txt` contains the
+small dashboard runtime; `requirements-offshore-final.txt` is used only by the
+daily workflow, and `requirements-research.txt` preserves the original notebook
+environment. Community Cloud updates the app when the workflow commits new
+artifacts. A public repository creates a public app by default.
 
 `results/` remains outside Git because it contains large generated artifacts.
-The dashboard reads the historical holdout and latest prediction parquets plus
-the newest full `data/datasets/offshore_cf_15m_ecmwf14p_engineered_...parquet`
-snapshot for time-varying installed capacity and observed capacity factor.
+The dashboard reads compact public prediction and actual-data parquets from
+`dashboard_data/` for time-varying installed capacity and observed capacity factor.
 The loader verifies that historical `capacity_factor × capacity × 1000`
 reconstructs source actual MW, so a revised or mismatched capacity snapshot
 cannot silently corrupt the chart. Forecast MW likewise use the capacity
@@ -134,5 +143,4 @@ not, the app shows an explicit error instead of mislabelling CF as MW.
 `.github/workflows/dashboard-checks.yml` installs the small dashboard runtime,
 compiles the app and runs deterministic dashboard tests on relevant pull
 requests and pushes to `main`. It does not retrain models or require ENTSO-E
-credentials. The daily data/retraining/forecast job still needs to be designed
-and connected to the dashboard's input artifacts.
+credentials.

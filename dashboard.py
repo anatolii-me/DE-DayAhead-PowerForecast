@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 import tomllib
 from pathlib import Path
 from urllib.parse import urlparse
@@ -249,6 +250,25 @@ def render_offshore(copy: dict, dark: bool, german: bool) -> None:
         st.plotly_chart(figure, width="stretch",
                         config={"displaylogo": False, "displayModeBar": False, "scrollZoom": True})
         st.caption(copy["offshore"]["chart_help"])
+        st.caption(copy["offshore"]["schedule_note"])
+        status_path = PROJECT_ROOT / "dashboard_data/status.json"
+        if status_path.exists():
+            try:
+                status = json.loads(status_path.read_text(encoding="utf-8"))
+                updated = pd.Timestamp(status["last_updated_utc"]).tz_convert(BERLIN_TIMEZONE)
+                fitted = pd.Timestamp(status["fitted_at_utc"]).tz_convert(BERLIN_TIMEZONE)
+                actual = pd.Timestamp(status["latest_actual_utc"]).tz_convert(BERLIN_TIMEZONE)
+                status_text = copy["offshore"]["status_note"].format(
+                    updated=f"{updated:%d.%m.%Y %H:%M %Z}",
+                    fitted=f"{fitted:%d.%m.%Y %H:%M %Z}",
+                    actual=f"{actual:%d.%m.%Y %H:%M %Z}",
+                )
+                st.markdown(f"<div class='refit-note'>{html.escape(status_text)}</div>",
+                            unsafe_allow_html=True)
+            except (KeyError, ValueError, TypeError):
+                st.warning(copy["offshore"]["status_unavailable"])
+        else:
+            st.caption(copy["offshore"]["status_unavailable"])
         if forward is None:
             st.markdown(
                 f"<p class='dash-note'>{html.escape(copy['offshore']['forward_unavailable'])}</p>",

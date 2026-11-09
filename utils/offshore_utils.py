@@ -413,16 +413,16 @@ def fetch_offshore_weather(
     end_ts   = pd.Timestamp(end_date)
  
     if start_ts < ECMWF_SINGLE_SINCE:
-        print(f"⚠️  start_date {start_date} is earlier than the first available "
+        print(f"Warning: start_date {start_date} is earlier than the first available "
               f"ECMWF Single Run date, {ECMWF_SINGLE_SINCE.date()}. Clipping it.")
         start_ts   = ECMWF_SINGLE_SINCE
         start_date = start_ts.strftime("%Y-%m-%d")
  
     var_names = _vars_ecmwf(height)
  
-    print(f"Run range {start_date} → {end_date} (ECMWF IFS HRES, height {height} m)")
+    print(f"Run range {start_date} -> {end_date} (ECMWF IFS HRES, height {height} m)")
     print("  Target for each run: calendar day D+1 in Europe/Berlin")
-    print("  (23 hours at spring DST, 25 at autumn DST, otherwise 24), ±1-hour buffer\n")
+    print("  (23 hours at spring DST, 25 at autumn DST, otherwise 24), +/-1-hour buffer\n")
  
     parts: list[pd.DataFrame] = []
     for day in pd.date_range(start=start_ts, end=end_ts, freq="D"):
@@ -431,7 +431,7 @@ def fetch_offshore_weather(
                 _fetch_day(day, lats, lons, ids, points, model, var_names, height, client)
             )
         except Exception as e:
-            print(f"    ⚠️  Error for run {day.date()} [{model}]: {e}")
+            print(f"    Warning: error for run {day.date()} [{model}]: {e}")
         # Wait 1.5 seconds between days, including after a failed request.
         time.sleep(1.5)
  
@@ -457,7 +457,7 @@ def fetch_offshore_weather(
     total  = len(result)
     nan_ws = int(result["wind_speed"].isna().sum())
     rows_per_run = result.groupby(["point_id", "datetime_run_utc"]).size()
-    print(f"\n✅ Total: {total} rows, {result['point_id'].nunique()} points.")
+    print(f"\nTotal: {total} rows, {result['point_id'].nunique()} points.")
     print(f"   NaN wind_speed     : {nan_ws} ({100 * nan_ws / max(total, 1):.1f}%)")
     print(f"   Duplicate natural keys (point_id, datetime_run_utc, datetime_utc): {n_dups}")
     print(f"   Height (height_m):\n{result['height_m'].value_counts().to_string()}")

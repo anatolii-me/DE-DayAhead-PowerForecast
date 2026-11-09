@@ -43,6 +43,12 @@ def frame_hash(frame):
     return hashlib.sha256(values + str(list(frame.columns)).encode()).hexdigest()
 
 
+def merge_generation(cached, fresh):
+    """Use valid revised intervals without erasing intervals absent from a response."""
+    combined = pd.concat([fresh, cached])
+    return combined.loc[~combined.index.duplicated(keep='first')].sort_index()
+
+
 def weather_features(raw, run_day):
     """Reject incomplete runs before regional means can hide missing points."""
     from utils.offshore_utils import SEA_POINTS
@@ -81,6 +87,29 @@ def weather_features(raw, run_day):
     return result.reindex(grid(target_day))
 
 
+def fetch_weather_with_fallback(run_day):
+    """Retry an incomplete 14-point response as two smaller source requests."""
+    from utils.offshore_utils import SEA_POINTS, fetch_offshore_weather
+
+    date = str(pd.Timestamp(run_day).date())
+    raw = fetch_offshore_weather(date, date)
+    try:
+        weather_features(raw, run_day)
+        return raw
+    except (ValueError, KeyError, AttributeError):
+        points = list(SEA_POINTS.items())
+        midpoint = len(points) // 2
+        parts = [
+            fetch_offshore_weather(date, date, points=dict(subset))
+            for subset in (points[:midpoint], points[midpoint:])
+        ]
+        if any(part.empty for part in parts):
+            raise ValueError('No complete ECMWF run available after split retry.')
+        repaired = pd.concat(parts, ignore_index=True)
+        weather_features(repaired, run_day)
+        return repaired
+
+
 def cached_weather_features(raw, run_day, cache_dir):
     """Reuse exact feature values until the raw run or transformation changes."""
     from utils import offshore_final_features
@@ -107,7 +136,7 @@ def refresh_sources(root, end_day=None, update=True, revision_days=7, max_reques
     Old missing days are retried too; a high watermark alone would lose these gaps.
     """
     root = Path(root)
-    cache = root / 'results/offshore_final/source_cache'
+    cache = root / 'dashboard_data/source_cache'
     cache.mkdir(parents=True, exist_ok=True)
     today = pd.Timestamp.now(tz=TZ).tz_localize(None).normalize()
     end_day = today - pd.DateOffset(days=1) if end_day is None else pd.Timestamp(end_day)
@@ -175,8 +204,9 @@ def refresh_sources(root, end_day=None, update=True, revision_days=7, max_reques
             fresh = fresh.loc[np.isfinite(fresh) & fresh.ge(0)].to_frame('gen_wind_off_act')
             if fresh.empty:
                 raise ValueError('No valid generation intervals were returned.')
-            generation = pd.concat([generation, fresh])
-            generation = generation.loc[~generation.index.duplicated(keep='last')].sort_index()
+            # Valid revised values supersede cached intervals; a partial
+            # response still leaves all other cached intervals intact.
+            generation = merge_generation(generation, fresh)
             save_parquet(generation, generation_path)
             events.append(dict(source='generation', day=str(day.date()), status=f'received {len(fresh)}/{len(grid(day))}'))
             failures = 0
@@ -211,8 +241,7 @@ def refresh_sources(root, end_day=None, update=True, revision_days=7, max_reques
                 continue
             requests_used += 1
             try:
-                from utils.offshore_utils import fetch_offshore_weather
-                cached = fetch_offshore_weather(str(run.date()), str(run.date()))
+                cached = fetch_weather_with_fallback(run)
                 # Keep a partial response for diagnosis and retry it next time.
                 # This branch is reached only if the old run was unusable.
                 if not cached.empty:
@@ -228,6 +257,9 @@ def refresh_sources(root, end_day=None, update=True, revision_days=7, max_reques
                 if failures >= max_consecutive_failures:
                     events.append(dict(source='weather', day=str(day.date()), status='API paused after repeated errors; cached runs still used'))
                 continue
+            finally:
+                # Give the archive API breathing room during a cold backfill.
+                time.sleep(2)
         if downloaded or not path.exists():
             save_parquet(cached, path)
         features.append(feature)

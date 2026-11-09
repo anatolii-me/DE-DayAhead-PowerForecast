@@ -39,19 +39,17 @@ class DashboardPaths:
     @classmethod
     def from_project_root(cls, project_root: Path) -> "DashboardPaths":
         """Build paths with optional environment overrides for deployment."""
-        historical_default = project_root / (
-            "results/offshore_joint_loss_hpo/c550de332f450772dce8/"
-            "selection_d2085702a714cb374154/holdout/XGBoost_full_history.parquet"
-        )
-        latest_default = project_root / "results/offshore_final/latest_predictions.parquet"
-        forward_default = project_root / "results/offshore_final/day_ahead_predictions.parquet"
+        public = project_root / "dashboard_data"
+        historical_default = public / "historical_predictions.parquet"
+        latest_default = public / "latest_predictions.parquet"
+        forward_default = public / "day_ahead_predictions.parquet"
         dataset_candidates = [
             path for path in (project_root / "data/datasets").glob(
                 "offshore_cf_15m_ecmwf14p_engineered_*_to_*.parquet"
             )
             if not path.stem.endswith("_daily_coverage")
         ]
-        refreshed_dataset = project_root / "results/offshore_final/actual_dataset_with_coverage.parquet"
+        refreshed_dataset = public / "actual_dataset.parquet"
         if refreshed_dataset.exists():
             dataset_candidates.append(refreshed_dataset)
         def coverage_key(path: Path) -> tuple[pd.Timestamp, int]:
@@ -208,10 +206,21 @@ def load_dashboard_predictions(paths: DashboardPaths) -> pd.DataFrame:
     if predictions.empty:
         raise DashboardDataError("No XGBoost HPO predictions are available for the dashboard.")
 
+    actual_dataset = _load_actual_dataset(paths.actual_dataset)
+    # Keep the ENTSO-E actual curve visible even on days where an ECMWF run
+    # could not be scored. Those intervals have no model prediction or metric.
+    observed = actual_dataset.loc[predictions.index.min():predictions.index.max()]
+    observed = observed.loc[
+        np.isfinite(observed[["capacity", "capacity_factor", "gen_wind_off_act"]]).all(axis=1)
+        & observed.capacity.gt(0)
+    ]
+    predictions = predictions.reindex(predictions.index.union(observed.index).sort_values())
     prediction_actuals = pd.Series(
         predictions.actual.to_numpy(), index=predictions.index, name="capacity_factor"
     )
-    actual_dataset = _load_actual_dataset(paths.actual_dataset)
+    predictions["actual"] = predictions.actual.combine_first(
+        actual_dataset.capacity_factor.reindex(predictions.index)
+    )
     capacity = actual_dataset.capacity.reindex(predictions.index)
     if capacity.isna().any() or (~np.isfinite(capacity)).any() or capacity.le(0).any():
         missing = int((capacity.isna() | ~np.isfinite(capacity) | capacity.le(0)).sum())
@@ -319,6 +328,9 @@ def load_forward_predictions(
         raise DashboardDataError("Forward forecast training window is not the notebook-6 365-day window.")
     if metadata["fitted_at_utc"].tz_convert(BERLIN_TIMEZONE).normalize() != target_day - pd.DateOffset(days=1):
         raise DashboardDataError("Forward forecast was not refitted on D-1.")
+    gate_closure = target_day - pd.DateOffset(days=1) + pd.Timedelta(hours=12)
+    if metadata["fitted_at_utc"].tz_convert(BERLIN_TIMEZONE) >= gate_closure:
+        raise DashboardDataError("The forward forecast was fitted after the day-ahead auction gate closed.")
     # The source run is at 00:00 UTC on D-1; local and UTC midnights differ.
     expected_run = (pd.Timestamp(target_day.date()) - pd.Timedelta(days=1)).tz_localize("UTC")
     if metadata["weather_run_utc"] != expected_run:
@@ -460,6 +472,15 @@ def build_forecast_figure(
                            + ": %{y:,.0f} MW<extra></extra>"),
         )
     )
+    observed = predictions.actual_mw.dropna()
+    if not observed.empty:
+        figure.add_vline(
+            x=observed.index.max().tz_convert(BERLIN_TIMEZONE),
+            line_color="#C68430" if dark_mode else "#A76512",
+            line_width=1.5, line_dash="dash",
+            annotation_text=labels.get("chart_cutoff", "Last actual data"),
+            annotation_position="top left",
+        )
     if has_forward:
         figure.add_trace(
             go.Scatter(
