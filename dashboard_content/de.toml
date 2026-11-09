@@ -71,7 +71,31 @@ last_year = "Letztes Jahr"
 all_history = "Gesamte Historie"
 
 [general_info]
-body = ""
+body = '''
+## Worum es in diesem Projekt geht
+
+Dieses Projekt entwickelt **Day-Ahead-Prognosen für die Stromgebotszone Deutschland–Luxemburg (DE-LU)** im 15-Minuten-Takt. Die erste verfügbare Prognose zeigt die Stromerzeugung aus Offshore-Windenergie; Solarenergie, Onshore-Windenergie, Stromlast und Day-Ahead-Preise sind als nächste Schritte geplant.
+
+Ziel sind Prognosen mit Informationen, die vor dem Liefertag verfügbar waren. Unter **Day-Ahead-Prognosen** können Sie die Offshore-Prognose mit der gemessenen Erzeugung vergleichen und ihre bisherige Modellgüte verfolgen.
+
+## So entsteht die Offshore-Prognose
+
+Ein XGBoost-Modell wird täglich mit einem 365-Tage-Trainingsfenster neu trainiert, das zwei Tage vor dem Liefertag endet. Für Liefertag D nutzt es einen ECMWF-Wetterlauf von **00:00 Uhr UTC am Vortag (D−1)** für 14 Standorte in Nord- und Ostsee. Die gemessene Offshore-Erzeugung wird bei ENTSO-E für das Gebiet `DE_LU` abgefragt; die monatliche installierte Offshore-Leistung stammt von Energy-Charts für Deutschland.
+
+Zunächst prognostiziert das Modell den *Kapazitätsfaktor* — den Anteil der installierten Offshore-Leistung, der voraussichtlich Strom erzeugt. Für die Darstellung wird das Ergebnis in Megawatt (MW) umgerechnet. Die stündlichen Wetterwerte werden auf das 15-Minuten-Raster übertragen. Dadurch entstehen passende Zeitpunkte, aber keine zusätzlichen Informationen über das Wetter zwischen zwei Vorhersagestunden.
+
+## So lesen Sie die Ergebnisse
+
+Unter **Day-Ahead-Prognosen** sehen Sie die aktuelle Prognose, verfügbare Ist-Werte und Kennzahlen für die letzten 365 Liefertage oder die gesamte ausgewertete Historie. Alle Lieferzeiten gelten für die Zeitzone Europe/Berlin.
+
+Die historischen Kennzahlen beschreiben die **rückblickende Modellleistung**; sie umfassen auch Zeiträume aus der Modellentwicklung und sind keine unabhängige Schätzung der künftigen Genauigkeit. Historische Quelldaten können zudem spätere Korrekturen von ENTSO-E enthalten. Abregelungen, Ausfälle, Wartung und Netzengpässe werden nicht ausdrücklich vorhergesagt. An einzelnen Tagen kann die tatsächliche Erzeugung daher deutlich abweichen.
+
+## Die nächsten Schritte
+
+Offshore-Windenergie ist die erste abgeschlossene Projektphase. Danach sind Solarenergie, Onshore-Windenergie und Stromlast vorgesehen; den Abschluss bildet der **Day-Ahead-Großhandelspreis für DE-LU** in EUR/MWh. Für das spätere Preismodell sollen Erzeugungs- und Lastprognosen verwendet werden, die ohne Training auf den jeweils vorherzusagenden Zeitraum entstanden sind.
+
+[README und Forschungsnotebooks auf GitHub ansehen](https://github.com/anatolii-me/DE-DayAhead-PowerForecast)
+'''
 
 [use_case]
 title = "Von Prognosen zu Batterieentscheidungen"

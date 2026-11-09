@@ -72,8 +72,31 @@ last_year = "Last year"
 all_history = "All history"
 
 [general_info]
-# Add Markdown here when you are ready. See README for an example.
-body = ""
+body = '''
+## What this project does
+
+This project builds **day-ahead forecasts for the Germany–Luxembourg (DE-LU) electricity bidding zone** at 15-minute resolution. The first live forecast covers offshore wind generation; solar, onshore wind, electricity load and day-ahead prices are planned as later stages.
+
+The goal is to produce forecasts using information available before the delivery day. In the **Day-Ahead Forecasting** tab, you can compare the offshore forecast with observed generation and follow its performance over time.
+
+## How the offshore forecast works
+
+Each day, an XGBoost model is refitted on a 365-day training window ending two days before delivery. For delivery day D, it uses one ECMWF weather forecast issued at **00:00 UTC on D−1**, sampled at 14 locations across the North Sea and Baltic Sea. Actual offshore generation is queried from ENTSO-E for the `DE_LU` area; monthly installed offshore capacity comes from Energy-Charts for Germany.
+
+The model first predicts *capacity factor* — the share of installed offshore capacity expected to generate electricity. This is converted to megawatts (MW) for the chart. Hourly weather forecasts are interpolated onto the 15-minute delivery grid; the extra time points do not add weather detail absent from the original forecast.
+
+## How to read the results
+
+The **Day-Ahead Forecasting** tab shows the current forecast, observed generation when available, and performance over the latest 365 delivery days or the full evaluated history. Delivery times follow the Europe/Berlin time zone.
+
+Historical scores describe **retrospective performance**, including periods used during model development. They are not an independent estimate of future accuracy. Historical source records may also include later ENTSO-E corrections. The model does not explicitly predict curtailment, wind-farm outages, maintenance or grid constraints, so individual days can differ substantially from observed output.
+
+## What comes next
+
+Offshore wind is the first completed stage. The planned sequence is solar generation, onshore wind, electricity load and finally the **DE-LU day-ahead wholesale price** in EUR/MWh. The price model will use generation and load forecasts produced without training on the same periods they aim to predict.
+
+[Read the project README and research notebooks on GitHub](https://github.com/anatolii-me/DE-DayAhead-PowerForecast)
+'''
 
 [use_case]
 title = "From forecasts to battery decisions"
