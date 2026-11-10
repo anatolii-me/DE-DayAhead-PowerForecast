@@ -24,7 +24,7 @@ ORIGINAL = Path(
 )
 RETRY_MINUTES = 15
 CUTOFF_HOUR = 11
-CUTOFF_MINUTE = 15
+CUTOFF_MINUTE = 30
 
 
 def _write_json(path: Path, value: dict) -> None:
@@ -50,7 +50,7 @@ def _check_public_credentials(public: Path) -> None:
 
 def wait_for_critical_sources(root: Path, generation: pd.DataFrame, end_day: pd.Timestamp,
                               features: list[str], log: dict, *, clock=None, sleep=None):
-    """Retry D-2 actuals and today's weather independently up to 11:15 Berlin."""
+    """Legacy in-process polling helper; scheduled attempts use run() instead."""
     clock = clock or (lambda: pd.Timestamp.now(tz="Europe/Berlin"))
     sleep = sleep or time.sleep
     today = clock().tz_convert("Europe/Berlin").normalize()
@@ -101,16 +101,25 @@ def extend_backtest(root: Path, dataset: pd.DataFrame, coverage: pd.DataFrame,
     path = root / PUBLIC / "latest_predictions.parquet"
     existing = pd.read_parquet(path) if path.exists() else pd.DataFrame()
     existing = existing.loc[existing.model.eq("XGBoost") & existing.loss.eq("l1")].copy() if not existing.empty else existing
-    existing_days = set(existing.day.astype(str)) if not existing.empty else set()
+    existing_days = set()
+    if not existing.empty:
+        for day, rows in existing.groupby("day"):
+            times = pd.DatetimeIndex(pd.to_datetime(rows.target_time, utc=True)).sort_values()
+            if times.equals(grid(day)) and np.isfinite(rows.prediction).all():
+                existing_days.add(str(day))
     config = selection["best_by_model"]["XGBoost"]
     features = selection["fit_protocol"]["features"]
     seed = selection["deployment_seed"]
     additions = []
-    for day in coverage.index[coverage.row_complete]:
+    for day in coverage.index[coverage.weather_available & coverage.capacity_available]:
         day = pd.Timestamp(day)
         if str(day.date()) in existing_days:
             continue
         issued_path = root / PUBLIC / "issued" / f"{day.date()}.parquet"
+        reconstructed_path = root / PUBLIC / "reconstructed" / f"{day.date()}.parquet"
+        was_issued = issued_path.exists()
+        if not was_issued and reconstructed_path.exists():
+            issued_path = reconstructed_path
         if issued_path.exists():
             issued = pd.read_parquet(issued_path)
             expected = grid(day)
@@ -118,7 +127,7 @@ def extend_backtest(root: Path, dataset: pd.DataFrame, coverage: pd.DataFrame,
             if not times.equals(expected):
                 raise DashboardDataError(f"Issued forecast for {day.date()} has an incomplete grid.")
             raw_prediction = issued.prediction.to_numpy(dtype=float)
-            provenance = "issued_live"
+            provenance = "issued_live" if was_issued and not issued.get("simulation", pd.Series(False)).any() else "reconstructed"
         else:
             try:
                 train, _, _, _ = training_rows(dataset, day, features)
@@ -133,7 +142,7 @@ def extend_backtest(root: Path, dataset: pd.DataFrame, coverage: pd.DataFrame,
             model = build_model(config, seed)
             model.fit(x_train, y_train, sample_weight=make_training_weights(y_train, config))
             raw_prediction = np.asarray(model.predict(target[features].astype("float32")), dtype=float)
-            provenance = "retrospective_simulation"
+            provenance = "reconstructed"
         target = dataset.reindex(grid(day))
         if not np.isfinite(raw_prediction).all():
             raise DashboardDataError(f"Non-finite backtest predictions for {day.date()}.")
@@ -161,16 +170,119 @@ def extend_backtest(root: Path, dataset: pd.DataFrame, coverage: pd.DataFrame,
     return existing
 
 
-def run(root: Path, *, update: bool = True) -> None:
+def recover_current_day(root: Path, dataset: pd.DataFrame, day: pd.Timestamp,
+                        selection: dict) -> None:
+    """Display today's issued forecast, or reconstruct it without today's labels.
+
+    This never changes the operational model or tomorrow's forecast. Recovered
+    values retain their provenance when actuals later become available.
+    """
+    from utils.offshore_day_ahead import capacity_for_targets
+    from utils.offshore_final_evaluation import build_model, make_training_weights
+
+    public = root / PUBLIC
+    targets = grid(day)
+    issued = public / "issued" / f"{day.date()}.parquet"
+    recovered = public / "reconstructed" / f"{day.date()}.parquet"
+    try:
+        if issued.exists() or recovered.exists():
+            frame = pd.read_parquet(issued if issued.exists() else recovered)
+            times = pd.DatetimeIndex(pd.to_datetime(frame.target_time, utc=True))
+            if not times.equals(targets) or not np.isfinite(frame.prediction).all():
+                raise DashboardDataError("Incomplete saved current-day forecast")
+            frame["provenance"] = "issued_live" if issued.exists() and not frame.get("simulation", pd.Series(False)).any() else "reconstructed"
+        else:
+            features = selection["fit_protocol"]["features"]
+            train, start, end, dropped = training_rows(dataset, day, features)
+            weather = current_weather(root, day - pd.DateOffset(days=1), features)
+            config = selection["best_by_model"]["XGBoost"]
+            model = build_model(config, selection["deployment_seed"])
+            y = train.capacity_factor.to_numpy(dtype=float)
+            model.fit(train[features].astype("float32"), y,
+                      sample_weight=make_training_weights(y, config))
+            raw = np.asarray(model.predict(weather[features].astype("float32")))
+            if not np.isfinite(raw).all():
+                raise DashboardDataError("Non-finite reconstructed predictions")
+            capacity, _ = capacity_for_targets(pd.read_parquet(public / "source_cache/capacity.parquet"), targets)
+            frame = pd.DataFrame({"target_time": targets.astype(str), "prediction": np.clip(raw, 0, 1),
+                                  "capacity_mw": capacity, "provenance": "reconstructed",
+                                  "training_start_utc": str(start), "training_end_exclusive_utc": str(end),
+                                  "weather_run_utc": str((day - pd.DateOffset(days=1)).tz_localize("UTC")),
+                                  "reconstructed_at_utc": str(pd.Timestamp.now(tz="UTC"))})
+            save_parquet(frame, recovered)
+        save_parquet(frame, public / "pending_predictions.parquet")
+        result = {"day": str(day.date()), "result": str(frame.provenance.iloc[0])}
+    except Exception as exc:
+        result = {"day": str(day.date()), "result": "unavailable", "error_type": type(exc).__name__}
+        print(f"Current-day recovery unavailable: {type(exc).__name__}")
+    _write_json(public / "run_logs" / f"{day.date()}_recovery.json", result)
+
+
+def refresh_scored_actuals(root: Path, dataset: pd.DataFrame) -> None:
+    """Synchronize revised labels without retraining or changing predictions."""
+    path = root / PUBLIC / "latest_predictions.parquet"
+    if not path.exists():
+        return
+    existing = pd.read_parquet(path)
+    times = pd.DatetimeIndex(pd.to_datetime(existing.target_time, utc=True))
+    labels = dataset.capacity_factor.reindex(times).to_numpy(dtype=float)
+    available = np.isfinite(labels)
+    existing.loc[available, "actual"] = labels[available]
+    save_parquet(existing, path)
+
+
+def refresh_display_actuals(root: Path, generation: pd.DataFrame, now: pd.Timestamp,
+                            log: dict) -> pd.Timestamp | None:
+    """Fetch intraday observations for display only; never return training rows."""
+    day = now.tz_convert("Europe/Berlin").tz_localize(None).normalize()
+    public = root / PUBLIC
+    try:
+        observed, _ = fetch_generation_day(day, generation, public / "source_cache/generation.parquet")
+        # ENTSO-E timestamps mark interval starts. Only completed intervals
+        # at the logical issue time may be shown, including historical replay.
+        observed = observed.reindex(grid(day))
+        observed = observed.loc[(observed.index + pd.Timedelta(minutes=15) <= now)
+                                & np.isfinite(observed.gen_wind_off_act)
+                                & observed.gen_wind_off_act.ge(0)].copy()
+        observed["as_of_utc"] = str(now.tz_convert("UTC"))
+        save_parquet(observed, public / "display_actuals.parquet")
+        outcome = f"received {len(observed)} completed intraday intervals"
+        latest = observed.index.max() if not observed.empty else None
+    except Exception as exc:
+        outcome = type(exc).__name__
+        latest = None
+    log.setdefault("attempts", []).append({"source": "ENTSO-E display actuals",
+                                           "at_utc": str(now), "outcome": outcome})
+    return latest
+
+
+def run(root: Path, *, update: bool = True, clock=None, simulation: bool = False,
+        backtest: bool = False) -> None:
     root = root.resolve()
     public = root / PUBLIC
+    clock = clock or (lambda: pd.Timestamp.now(tz="UTC"))
+    now = clock().tz_convert("Europe/Berlin")
+    today = now.tz_localize(None).normalize()
+    target_day = today + pd.DateOffset(days=1)
+    if update and not simulation:
+        if now.tz_convert("UTC").hour < 5 or (now.hour, now.minute) >= (11, 30):
+            print("Outside the morning publication window; no changes.")
+            return
+        status_path = public / "status.json"
+        if status_path.exists():
+            previous = json.loads(status_path.read_text())
+            if (previous.get("forecast_day") == str(target_day.date())
+                    and previous.get("forecast_status") == "issued"
+                    and previous.get("fit_mode") == "fresh"
+                    and (public / "issued" / f"{target_day.date()}.parquet").exists()):
+                print("Fresh forecast already published; no changes.")
+                return
     selection = json.loads((public / "frozen_selection.json").read_text(encoding="utf-8"))
     original_path = root / ORIGINAL
     if hashlib.sha256(original_path.read_bytes()).hexdigest() != selection["dataset_hash"]:
         raise DashboardDataError("The original training dataset differs from the frozen model selection.")
     original = pd.read_parquet(original_path)
-    today = pd.Timestamp.now(tz="Europe/Berlin").tz_localize(None).normalize()
-    # Issue day is D-1. The last training and displayed actual day is D-2.
+    # Issue day is D-1. Training ends at D-2; display-only actuals are separate.
     end_day = today - pd.DateOffset(days=1)
     target_day = today + pd.DateOffset(days=1)
     log = {"issue_day": str(today.date()), "forecast_day": str(target_day.date()),
@@ -184,15 +296,23 @@ def run(root: Path, *, update: bool = True) -> None:
     current_run = None
     generation_ready = _generation_complete(generation, end_day)
     if update:
-        generation, current_run, generation_ready = wait_for_critical_sources(
-            root, generation, end_day, features, log)
+        # One bounded attempt per invocation. The scheduler supplies retries,
+        # including retries of capacity and historical feature gaps.
+        if simulation or clock().tz_convert("Europe/Berlin").time() < pd.Timestamp("11:30").time():
+            try:
+                current_run = current_weather(root, today, features)
+                outcome = "complete"
+            except Exception as exc:
+                outcome = type(exc).__name__
+            log["attempts"].append({"source": "ECMWF midnight run",
+                                    "at_utc": str(clock()), "outcome": outcome})
     dataset, coverage = assemble_dataset(
         original, weather, generation, capacity, end_day, features,
         source_events=events,
     )
     latest = coverage.loc[end_day]
-    extend_backtest(root, dataset, coverage, selection)
     actual = dataset[["capacity", "capacity_factor", "gen_wind_off_act"]]
+    refresh_scored_actuals(root, dataset)
     save_parquet(actual, public / "actual_dataset.parquet")
     save_parquet(coverage, public / "daily_coverage.parquet")
     if not events.empty:
@@ -211,13 +331,17 @@ def run(root: Path, *, update: bool = True) -> None:
         if current_run is None:
             attempted_weather = any(item["source"] == "ECMWF midnight run" for item in log["attempts"])
             forecast_state = "weather_unavailable" if attempted_weather else "deadline_missed"
-            failure_reason = ("The current ECMWF midnight run remained unavailable by 11:15 Europe/Berlin."
-                              if attempted_weather else "The scheduled job reached the 11:15 Europe/Berlin cutoff before source polling.")
+            failure_reason = ("The current ECMWF midnight run is unavailable; retry within the morning window."
+                              if attempted_weather else "The job reached the 11:30 Europe/Berlin cutoff before source polling.")
         else:
             try:
                 issued = issue_tomorrow_forecast(
-                    root, dataset=dataset, weather=current_run, reuse_model=(mode == "reused"))
+                    root, dataset=dataset, weather=current_run, reuse_model=(mode == "reused"), clock=clock)
                 forward = pd.read_parquet(issued)
+                if simulation:
+                    forward["simulation"] = True
+                    forward["executed_at_utc"] = str(pd.Timestamp.now(tz="UTC"))
+                    save_parquet(forward, issued)
                 save_parquet(forward, public / "issued" / f"{target_day.date()}.parquet")
             except DashboardDataError as exc:
                 forecast_state = "model_unavailable" if mode == "reused" else "fit_failed"
@@ -225,9 +349,15 @@ def run(root: Path, *, update: bool = True) -> None:
                 print(f"Forecast withheld: {type(exc).__name__}: {failure_reason}")
         actual_values = actual.gen_wind_off_act.dropna()
         actual_time = str(actual_values.index.max()) if not actual_values.empty else None
+        if forward is not None:
+            display_time = refresh_display_actuals(root, generation, clock(), log)
+            if display_time is not None:
+                actual_time = str(display_time)
         model_meta_path = public / "model/metadata.json"
         model_meta = json.loads(model_meta_path.read_text(encoding="utf-8")) if model_meta_path.exists() else {}
         status = {
+            "simulation": simulation,
+            "issue_day": str(today.date()),
             "last_updated_utc": str(pd.Timestamp.now(tz="UTC")),
             "fitted_at_utc": model_meta.get("fitted_at_utc"),
             "latest_actual_utc": actual_time,
@@ -243,6 +373,8 @@ def run(root: Path, *, update: bool = True) -> None:
         }
         _write_json(public / "status.json", status)
         log.update({"completed_at_utc": status["last_updated_utc"],
+                    "simulation": simulation,
+                    "source_events": events.drop(columns=["detail"], errors="ignore").to_dict("records"),
                     "result": forecast_state, "fit_mode": status["fit_mode"],
                     "training_data_status": status["training_data_status"],
                     "model_fitted_at_utc": status["fitted_at_utc"],
@@ -252,6 +384,12 @@ def run(root: Path, *, update: bool = True) -> None:
                     "dropped_train_days": model_meta.get("dropped_train_days"),
                     "failure_reason": failure_reason})
         _write_json(public / "run_logs" / f"{today.date()}.json", log)
+        _write_json(public / "run_logs" / f"{today.date()}_{pd.Timestamp.now(tz='UTC').strftime('%H%M%S%f')}.json", log)
+    # Historical scoring must never delay today's publication. It is opt-in
+    # and can be run separately with --offline --backtest.
+    if backtest:
+        extend_backtest(root, dataset, coverage, selection)
+        recover_current_day(root, dataset, today, selection)
     _check_public_credentials(public)
     print(f"Complete source days: {int(coverage.row_complete.sum())}/{len(coverage)}; latest {end_day.date()}")
 
@@ -306,6 +444,7 @@ def main() -> None:
     parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--offline", action="store_true", help="Use cached sources and do not issue a forward forecast")
     parser.add_argument("--bootstrap-model", action="store_true", help="Fit the initial reusable model from cached data")
+    parser.add_argument("--backtest", action="store_true", help="Extend retrospective scores after forecasting")
     args = parser.parse_args()
     from dotenv import load_dotenv
 
@@ -313,7 +452,18 @@ def main() -> None:
     if args.bootstrap_model:
         bootstrap_model(args.project_root)
     else:
-        run(args.project_root, update=not args.offline)
+        try:
+            run(args.project_root, update=not args.offline, backtest=args.backtest)
+        except Exception as exc:
+            # Persist a sanitized diagnostic even when fitting or assembly fails.
+            # API exception messages can contain credential-bearing request URLs.
+            now = pd.Timestamp.now(tz="UTC")
+            issue_day = str(now.tz_convert("Europe/Berlin").date())
+            _write_json(args.project_root / PUBLIC / "run_logs" /
+                        f"{issue_day}_{now.strftime('%H%M%S%f')}_error.json",
+                        {"issue_day": issue_day, "at_utc": str(now),
+                         "result": "pipeline_error", "error_type": type(exc).__name__})
+            raise SystemExit(f"Offshore pipeline failed: {type(exc).__name__}") from None
 
 
 if __name__ == "__main__":

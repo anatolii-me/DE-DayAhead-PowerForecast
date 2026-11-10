@@ -183,6 +183,11 @@ def refresh_sources(root, end_day=None, update=True, revision_days=7, max_reques
             from utils.get_installed_capacity import get_installed_power
             fresh = get_installed_power('2024-01-01', str(today.date()), sources=['Wind offshore'])
             fresh = fresh.rename(columns={'date': 'dt_utc', 'Wind offshore': 'offshore_capacity'})
+            # Energy-Charts labels the reporting month; its value describes
+            # the END of that month, not its beginning. Only new downloads
+            # use this explicit convention; the frozen research snapshot stays intact.
+            fresh['dt_utc'] = fresh.dt_utc + pd.offsets.MonthBegin(1)
+            fresh = fresh.loc[fresh.dt_utc <= pd.Timestamp.now(tz='UTC')]
             fresh = fresh.loc[np.isfinite(fresh.offshore_capacity) & fresh.offshore_capacity.gt(0)]
             if fresh.empty:
                 raise ValueError('No valid installed capacity was returned.')

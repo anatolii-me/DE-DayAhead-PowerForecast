@@ -70,7 +70,7 @@ def _save_model(model, metadata: dict, directory: Path) -> None:
 
 
 def fit_model_snapshot(project_root: Path, dataset: pd.DataFrame,
-                       target_day: pd.Timestamp, selection: dict):
+                       target_day: pd.Timestamp, selection: dict, *, clock=None):
     """Fit and persist the latest complete 365-day training window."""
     from utils.offshore_final_evaluation import build_model, make_training_weights
 
@@ -81,7 +81,7 @@ def fit_model_snapshot(project_root: Path, dataset: pd.DataFrame,
     y_train = train.capacity_factor.to_numpy(dtype=float)
     model = build_model(config, selection["deployment_seed"])
     model.fit(x_train, y_train, sample_weight=make_training_weights(y_train, config))
-    fitted_at = pd.Timestamp.now(tz="UTC")
+    fitted_at = clock() if clock else pd.Timestamp.now(tz="UTC")
     metadata = {
         "selection_hash": _selection_hash(selection), "features": features,
         "fitted_at_utc": str(fitted_at), "training_start_utc": str(start_utc),
@@ -237,7 +237,7 @@ def issue_tomorrow_forecast(
         train_count = int(metadata["train_rows"])
         dropped_days = metadata["dropped_train_days"]
     else:
-        model, metadata = fit_model_snapshot(project_root, dataset, target_day, selection)
+        model, metadata = fit_model_snapshot(project_root, dataset, target_day, selection, clock=clock)
         start_utc = pd.Timestamp(metadata["training_start_utc"])
         end_utc = pd.Timestamp(metadata["training_end_exclusive_utc"])
         dropped_days = metadata["dropped_train_days"]

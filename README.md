@@ -39,8 +39,24 @@ I do not use ENTSO-E's published generation forecasts as model inputs. Historica
 
 The dashboard is updated from a daily forecast pipeline. Its historical scores are a retrospective simulation using currently available source records, which may include later ENTSO-E corrections.
 
-The GitHub Actions job starts at 07:15 UTC each day. It refreshes cached source gaps and retries missing D−2 ENTSO-E generation and the current 00:00 UTC ECMWF run every 15 minutes until **11:15 Europe/Berlin**, leaving 45 minutes before the noon day-ahead gate. With complete training data, it refits the frozen XGBoost selection on the latest 365 local days. If training data remain incomplete, it uses the latest saved fit and labels its age. If the current weather run is still unavailable, it publishes no new forecast and records the reason. The latest status is in `dashboard_data/status.json`; per-day source attempts and fit decisions are in `dashboard_data/run_logs/`. The dashboard also exposes the latest log. The reusable model and its training provenance are in `dashboard_data/model/`.
+## Pipeline & Local Simulation
 
+The forecasting pipeline automatically updates daily via GitHub Actions, combining ECMWF weather forecasts, ENTSO-E actuals, and Energy-Charts capacity data.
+
+### Local Developer Simulation
+
+You can run data downloads, model refits, and forecasting locally in an isolated sandbox without affecting production data:
+
+```bash
+# Run a fresh local simulation
+python -m utils.offshore_simulation --output results/simulations/my-run
+
+# Replay a specific historical date
+python -m utils.offshore_simulation --issue-day 2026-11-09 --output results/simulations/replay
+
+# Preview simulation results in the local dashboard ([http://127.0.0.1](http://127.0.0.1))
+python -m utils.offshore_simulation --preview results/simulations/my-run
+```
 `ENTSOE_API_KEY` is read only from the local environment or the GitHub Actions secret. The pipeline checks public artifacts for the literal credential before completion. Local `.env` files are ignored by Git.
 
 ## Roadmap

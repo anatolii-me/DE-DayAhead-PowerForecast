@@ -227,7 +227,9 @@ _LAPSE_RATE = 0.0065   # K/m
  
 # ── Client with cache and retries ─────────────────────────────────────────────
 def _build_client() -> openmeteo_requests.Client:
-    cache_session = requests_cache.CachedSession(".cache", expire_after=3600)
+    # A 200 response can still contain an incomplete run. Never retain it
+    # across the next scheduled attempt; validated parquet is our durable cache.
+    cache_session = requests_cache.CachedSession(backend="memory", expire_after=0)
     retry_session = cast(
         niquests.Session,
         retry(cache_session, retries=5, backoff_factor=0.2),
@@ -329,7 +331,7 @@ def _fetch_day(
     }
  
     print(f"  [Single Run | {model}] run {run_str}, {len(ids)} points...")
-    responses = client.weather_api(url, params=params)
+    responses = client.weather_api(url, params=params, timeout=60)
  
     # Calendar day D+1 in Europe/Berlin. ZoneInfo converts local midnight to
     # the correct UTC instant for the date, including DST.

@@ -109,9 +109,9 @@ class RetryTests(unittest.TestCase):
                 clock=lambda: current[0], sleep=advance)
         self.assertTrue(ready)
         self.assertIsNone(fetched_weather)
-        self.assertEqual(current[0].strftime("%H:%M"), "11:15")
-        self.assertEqual(sleeps, [900, 600])
-        self.assertEqual(len(log["attempts"]), 2)
+        self.assertEqual(current[0].strftime("%H:%M"), "11:30")
+        self.assertEqual(sleeps, [900, 900, 600])
+        self.assertEqual(len(log["attempts"]), 3)
 
 
 if __name__ == "__main__":

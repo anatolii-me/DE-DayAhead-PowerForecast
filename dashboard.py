@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import tomllib
 from pathlib import Path
 from urllib.parse import urlparse
@@ -18,6 +19,9 @@ from utils.offshore_dashboard import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+SIMULATION_ROOT = os.getenv("OFFSHORE_SIMULATION_ROOT")
+DATA_ROOT = Path(SIMULATION_ROOT).resolve() if SIMULATION_ROOT else PROJECT_ROOT
+SIMULATION = json.loads((DATA_ROOT / "simulation.json").read_text()) if SIMULATION_ROOT else None
 CONTENT_DIR = PROJECT_ROOT / "dashboard_content"
 ASSET_DIR = PROJECT_ROOT / "dashboard_assets"
 METRIC_COPY_KEYS = {
@@ -38,7 +42,9 @@ def read_toml(path: Path) -> dict:
 def artifact_fingerprint(paths: DashboardPaths) -> tuple:
     """Invalidate cached data when a notebook refreshes an input artifact."""
     result = []
-    for path in (paths.historical_predictions, paths.latest_predictions, paths.actual_dataset):
+    for path in (paths.historical_predictions, paths.latest_predictions, paths.actual_dataset,
+                 paths.latest_predictions.parent / "pending_predictions.parquet",
+                 paths.latest_predictions.parent / "display_actuals.parquet"):
         stat = path.stat() if path is not None and path.exists() else None
         result.append((str(path), stat.st_size if stat else None, stat.st_mtime_ns if stat else None))
     return tuple(result)
@@ -213,13 +219,14 @@ def render_hero(copy: dict, profiles: dict, german: bool) -> None:
 def render_offshore(copy: dict, dark: bool, german: bool) -> None:
     with st.container(key="offshore-panel"):
         try:
-            paths = DashboardPaths.from_project_root(PROJECT_ROOT)
+            paths = DashboardPaths.from_project_root(DATA_ROOT)
             predictions = get_predictions(paths, artifact_fingerprint(paths))
         except DashboardDataError as error:
             st.error(str(error))
             return
         try:
-            forward = load_forward_predictions(paths)
+            forward = load_forward_predictions(paths, now=pd.Timestamp(SIMULATION["logical_time"]) if SIMULATION else None,
+                                               allow_simulation=bool(SIMULATION))
         except DashboardDataError as error:
             st.warning(str(error))
             forward = None
@@ -251,7 +258,7 @@ def render_offshore(copy: dict, dark: bool, german: bool) -> None:
                         config={"displaylogo": False, "displayModeBar": False, "scrollZoom": True})
         st.caption(copy["offshore"]["chart_help"])
         st.caption(copy["offshore"]["schedule_note"])
-        status_path = PROJECT_ROOT / "dashboard_data/status.json"
+        status_path = DATA_ROOT / "dashboard_data/status.json"
         if status_path.exists():
             try:
                 status = json.loads(status_path.read_text(encoding="utf-8"))
@@ -280,7 +287,7 @@ def render_offshore(copy: dict, dark: bool, german: bool) -> None:
                            else "model_reused_other")
                     st.info(copy["offshore"][key].format(
                         age=status["model_age_days"], day=status["forecast_day"]))
-                log_path = PROJECT_ROOT / "dashboard_data/run_logs" / f"{updated.date()}.json"
+                log_path = DATA_ROOT / "dashboard_data/run_logs" / f"{status.get('issue_day', updated.date())}.json"
                 if log_path.exists():
                     with st.expander(copy["offshore"]["run_log_label"]):
                         st.json(json.loads(log_path.read_text(encoding="utf-8")))
@@ -338,6 +345,9 @@ def render_forecasting(copy: dict, dark: bool, german: bool) -> None:
 def main() -> None:
     st.set_page_config(page_title="Day-Ahead Forecasting for the German Energy Market",
                        page_icon="🌬️", layout="wide", initial_sidebar_state="collapsed")
+    if SIMULATION:
+        st.warning(f"SIMULATION — issue day {SIMULATION['issue_day']}. "
+                   f"Executed {SIMULATION['executed_at_utc']}. Not a live market forecast.")
     if st.session_state.get("dashboard_language") not in {"EN", "DE"}:
         st.session_state["dashboard_language"] = "EN"
     language = st.session_state["dashboard_language"]

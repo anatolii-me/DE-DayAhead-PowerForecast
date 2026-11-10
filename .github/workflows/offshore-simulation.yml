@@ -1,0 +1,38 @@
+name: Offshore developer simulation
+on:
+  workflow_dispatch:
+    inputs:
+      issue_day:
+        description: "Local issue day YYYY-MM-DD (empty means today)"
+        required: false
+        type: string
+permissions:
+  contents: read
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-offshore-final.txt
+      - run: python -m pip install -r requirements-offshore-final.txt
+      - name: Simulate in an isolated directory
+        env:
+          ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
+          ISSUE_DAY: ${{ inputs.issue_day }}
+        run: |
+          args=()
+          if [ -n "$ISSUE_DAY" ]; then args+=(--issue-day "$ISSUE_DAY"); fi
+          python -m utils.offshore_simulation --output results/simulations/manual "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: offshore-simulation
+          path: |
+            results/simulations/manual/simulation.json
+            results/simulations/manual/dashboard_data
+          retention-days: 7

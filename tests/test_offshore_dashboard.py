@@ -190,7 +190,9 @@ class OffshoreDashboardTests(unittest.TestCase):
                 "actual_mw": 3500.0, "prediction_mw": 3600.0,
             }, index=evaluated_index)
             figure = build_forecast_figure(evaluated, forward=forward)
-            self.assertEqual(len(figure.data), 3)
+            self.assertEqual(len(figure.data), 2)
+            self.assertEqual([trace.name for trace in figure.data], ["Actual", "Forecast"])
+            self.assertEqual(sum(pd.notna(figure.data[1].y)), 192)
             self.assertEqual(len(figure.layout.shapes), 3)
             self.assertIsNone(load_forward_predictions(
                 paths, now=pd.Timestamp("2026-01-22 10:00", tz="Europe/Berlin")
@@ -250,6 +252,12 @@ class OffshoreDashboardTests(unittest.TestCase):
         self.assertEqual(index[-1].tz_convert("Europe/Berlin").strftime("%Y-%m-%d %H:%M"),
                          "2026-10-14 23:45")
         self.assertEqual(dropped, [])
+        future = pd.DataFrame({"row_complete": True, "capacity_factor": 0.99, "feature": 999.0},
+                              index=pd.date_range(cutoff, periods=192, freq="15min").tz_convert("UTC"))
+        with_future = pd.concat([dataset, future])
+        restricted, _, restricted_end, _ = training_rows(with_future, day, ["feature"])
+        pd.testing.assert_frame_equal(restricted, train)
+        self.assertEqual(restricted_end, actual_end)
         dataset.loc[index[-1], "row_complete"] = False
         with self.assertRaises(DashboardDataError):
             training_rows(dataset, day, ["feature"])

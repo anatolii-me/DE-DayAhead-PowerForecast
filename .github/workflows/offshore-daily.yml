@@ -2,7 +2,8 @@ name: Offshore daily forecast
 
 on:
   schedule:
-    - cron: "15 7 * * *"
+    - cron: "0,15,30,45 5-10 * * *"
+    - cron: "35 9,10 * * *"
   workflow_dispatch:
 
 permissions:
@@ -15,36 +16,81 @@ concurrency:
 jobs:
   forecast:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: true
+          ref: main
+      - name: Check publication window and completed forecast
+        id: due
+        run: |
+          python - <<'PY'
+          import datetime, json, os
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          now = datetime.datetime.now(ZoneInfo("Europe/Berlin"))
+          target = str(now.date() + datetime.timedelta(days=1))
+          path = Path("dashboard_data/status.json")
+          status = json.loads(path.read_text()) if path.exists() else {}
+          complete = (status.get("forecast_day") == target and status.get("forecast_status") == "issued"
+                      and status.get("fit_mode") == "fresh" and Path(f"dashboard_data/issued/{target}.parquet").exists())
+          recovery_path = Path(f"dashboard_data/run_logs/{now.date()}_recovery.json")
+          recovery = json.loads(recovery_path.read_text()) if recovery_path.exists() else {}
+          complete = complete and recovery.get("result") in ("issued_live", "reconstructed")
+          due = now.astimezone(datetime.timezone.utc).hour >= 5 and now.time() < datetime.time(11, 30) and not complete
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"run={str(due).lower()}\n")
+          PY
+      - name: Report missing daily result after cutoff
+        run: |
+          python - <<'PY'
+          import datetime, json
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          now = datetime.datetime.now(ZoneInfo("Europe/Berlin"))
+          if datetime.time(11, 30) <= now.time() < datetime.time(12):
+              path = Path("dashboard_data/status.json")
+              status = json.loads(path.read_text()) if path.exists() else {}
+              target = str(now.date() + datetime.timedelta(days=1))
+              if status.get("forecast_day") != target or status.get("forecast_status") != "issued":
+                  raise SystemExit("No daily forecast by cutoff; inspect source status and attempt logs.")
+              if status.get("fit_mode") != "fresh":
+                  print("::warning::Forecast uses the saved model; today's refit did not complete.")
+          PY
       - uses: actions/setup-python@v6
+        if: steps.due.outputs.run == 'true'
         with:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: requirements-offshore-final.txt
       - name: Install model runtime
+        if: steps.due.outputs.run == 'true'
         run: python -m pip install -r requirements-offshore-final.txt
       - name: Refresh, refit and publish artifacts
+        if: steps.due.outputs.run == 'true'
         env:
           ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
         run: python -m utils.offshore_daily
-      - name: Preserve successful source downloads
-        if: always()
+      - name: Preserve source downloads, status and forecasts
+        if: always() && steps.due.outputs.run == 'true'
+        env:
+          ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
         run: |
+          python -c "from pathlib import Path; from utils.offshore_daily import _check_public_credentials; _check_public_credentials(Path('dashboard_data'))"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add dashboard_data/source_cache
-          if ! git diff --cached --quiet; then
-            git commit -m "Cache refreshed offshore sources"
-            git push origin HEAD:main
-          fi
-      - name: Commit public artifacts
-        run: |
           git add dashboard_data
           if ! git diff --cached --quiet; then
-            git commit -m "Update offshore day-ahead forecast"
+            git commit -m "chore: update offshore forecast and source cache"
+            git push origin HEAD:main
+          fi
+      - name: Extend historical scores after publishing
+        if: success() && steps.due.outputs.run == 'true'
+        run: |
+          python -m utils.offshore_daily --offline --backtest
+          git add dashboard_data
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update offshore retrospective scores"
             git push origin HEAD:main
           fi

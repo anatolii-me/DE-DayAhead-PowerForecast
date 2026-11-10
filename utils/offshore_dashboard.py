@@ -255,11 +255,40 @@ def load_dashboard_predictions(paths: DashboardPaths) -> pd.DataFrame:
         predictions.weekly_persistence.to_numpy(dtype=float) * predictions.capacity_mw
     )
     predictions["local_time"] = predictions.index.tz_convert(BERLIN_TIMEZONE)
+    pending_path = paths.latest_predictions.parent / "pending_predictions.parquet"
+    if pending_path.exists():
+        pending = _timestamp_index(pd.read_parquet(pending_path))
+        # Only the next local day after the actual dataset can be unscored.
+        next_day = actual_dataset.index.max().tz_convert(BERLIN_TIMEZONE).normalize() + pd.DateOffset(days=1)
+        expected = pd.date_range(next_day, next_day + pd.DateOffset(days=1), freq="15min", inclusive="left").tz_convert("UTC")
+        if pending.index.equals(expected):
+            if (not np.isfinite(pending[["prediction", "capacity_mw"]]).all().all()
+                    or not pending.prediction.between(0, 1).all() or not pending.capacity_mw.gt(0).all()):
+                raise DashboardDataError("Invalid pending current-day forecast")
+            pending["prediction_mw"] = pending.prediction * pending.capacity_mw
+            pending["actual"] = np.nan
+            pending["actual_mw"] = np.nan
+            pending["local_time"] = pending.index.tz_convert(BERLIN_TIMEZONE)
+            predictions = pd.concat([predictions, pending]).sort_index()
+    display_path = paths.latest_predictions.parent / "display_actuals.parquet"
+    if display_path.exists():
+        display = pd.read_parquet(display_path)
+        display.index = pd.to_datetime(display.index, utc=True)
+        next_day = actual_dataset.index.max().tz_convert(BERLIN_TIMEZONE).normalize() + pd.DateOffset(days=1)
+        as_of = pd.to_datetime(display.as_of_utc, utc=True)
+        display = display.loc[(display.index >= next_day)
+                              & (display.index < next_day + pd.DateOffset(days=1))
+                              & (display.index + pd.Timedelta(minutes=15) <= as_of)
+                              & np.isfinite(display.gen_wind_off_act) & display.gen_wind_off_act.ge(0)]
+        predictions = predictions.reindex(predictions.index.union(display.index).sort_values())
+        predictions.loc[display.index, "actual_mw"] = display.gen_wind_off_act
+        # Keep intraday observations out of scored CF history and all model inputs.
+        predictions["local_time"] = predictions.index.tz_convert(BERLIN_TIMEZONE)
     return predictions
 
 
 def load_forward_predictions(
-    paths: DashboardPaths, *, now: pd.Timestamp | None = None,
+    paths: DashboardPaths, *, now: pd.Timestamp | None = None, allow_simulation: bool = False,
 ) -> pd.DataFrame | None:
     """Read a separately issued, unscored day-ahead forecast if it is current.
 
@@ -272,6 +301,8 @@ def load_forward_predictions(
     if path is None or not path.exists():
         return None
     frame = _read_parquet(path, "Forward day-ahead predictions")
+    if "simulation" in frame and frame.simulation.any() and not allow_simulation:
+        raise DashboardDataError("Simulation forecasts cannot be displayed as live forecasts.")
     required = {
         "target_time", "prediction", "capacity_mw", "model", "loss",
         "fitted_at_utc", "training_start_utc", "training_end_exclusive_utc",
@@ -417,7 +448,8 @@ def metric_windows(predictions: pd.DataFrame) -> pd.DataFrame:
         raise DashboardDataError("The dashboard cannot calculate metrics from an empty frame.")
     # Use full local delivery dates, including 92/100 intervals on DST dates.
     local_days = predictions.index.tz_convert(BERLIN_TIMEZONE).normalize()
-    latest_day = local_days.max()
+    observed_days = local_days[predictions.actual.notna().to_numpy()]
+    latest_day = observed_days.max() if len(observed_days) else local_days.max()
     windows: dict[str, pd.DataFrame] = {
         "Last year": predictions.loc[local_days >= latest_day - pd.DateOffset(days=364)],
         "All history": predictions,
@@ -460,7 +492,7 @@ def build_forecast_figure(
     labels: dict[str, str] | None = None,
     forward: pd.DataFrame | None = None,
 ) -> go.Figure:
-    """Build an MW chart with a distinct, unscored forward segment when issued."""
+    """Show one chronological forecast series and one observed generation series."""
     if predictions.empty:
         raise DashboardDataError("There are no predictions to plot.")
     has_forward = forward is not None and not forward.empty
@@ -468,6 +500,8 @@ def build_forecast_figure(
     timeline = pd.date_range(predictions.index.min(), latest_time, freq="15min", tz="UTC")
     actual_mw = predictions.actual_mw.reindex(timeline)
     prediction_mw = predictions.prediction_mw.reindex(timeline)
+    if has_forward:
+        prediction_mw = forward.prediction_mw.reindex(timeline).combine_first(prediction_mw)
     local_time = timeline.tz_convert(BERLIN_TIMEZONE)
     last_day = latest_time.tz_convert(BERLIN_TIMEZONE).normalize()
     start = last_day - pd.DateOffset(days=6)
@@ -482,7 +516,7 @@ def build_forecast_figure(
         go.Scatter(
             x=local_time,
             y=actual_mw,
-            name=labels.get("chart_actual", "Actual generation"),
+            name=labels.get("chart_actual", "Actual"),
             legendrank=1,
             mode="lines",
             line={"color": "#687573" if dark_mode else "#43504E", "width": 1.6},
@@ -495,43 +529,32 @@ def build_forecast_figure(
     observed = predictions.actual_mw.dropna()
     if not observed.empty:
         figure.add_vline(
-            x=observed.index.max().tz_convert(BERLIN_TIMEZONE),
+            x=(observed.index.max() + pd.Timedelta(minutes=15)).tz_convert(BERLIN_TIMEZONE),
             line_color="#C68430" if dark_mode else "#A76512",
             line_width=1.5, line_dash="dash",
-            annotation_text=labels.get("chart_cutoff", "Last actual data"),
+            annotation_text=labels.get("chart_cutoff", "Last Update"),
             annotation_position="top left",
         )
     if has_forward:
-        figure.add_trace(
-            go.Scatter(
-                x=forward.index.tz_convert(BERLIN_TIMEZONE),
-                y=forward.prediction_mw,
-                name=labels.get("chart_forward", "Forecast · actual pending"),
-                legendrank=3,
-                mode="lines",
-                line={"color": "#42D7B3" if dark_mode else "#0B9F82", "width": 2.8},
-                connectgaps=False,
-                hovertemplate=("%{x|%d %b %Y, %H:%M}<br>"
-                               + labels.get("chart_forward_hover", "Forecast · actual pending")
-                               + ": %{y:,.0f} MW<extra></extra>"),
-            )
-        )
         target_day = forward.index.min().tz_convert(BERLIN_TIMEZONE).normalize()
         issue_day = target_day - pd.DateOffset(days=1)
         band = "#B7C0BD" if dark_mode else "#778581"
+        today_start = max(issue_day, (observed.index.max() + pd.Timedelta(minutes=15)).tz_convert(BERLIN_TIMEZONE)) if not observed.empty else issue_day
         figure.add_vrect(
-            x0=issue_day, x1=target_day, fillcolor=band, opacity=0.10,
+            x0=min(today_start, target_day), x1=target_day, fillcolor=band, opacity=0.10,
             line_width=0, layer="below",
+            annotation_text=labels.get("chart_today", "Today"), annotation_position="top left",
         )
         figure.add_vrect(
             x0=target_day, x1=target_day + pd.DateOffset(days=1),
             fillcolor=band, opacity=0.18, line_width=0, layer="below",
+            annotation_text=labels.get("chart_delivery", "Delivery Date"), annotation_position="top left",
         )
     figure.add_trace(
         go.Scatter(
             x=local_time,
             y=prediction_mw,
-            name=labels.get("chart_forecast", "Forecast · XGBoost HPO"),
+            name=labels.get("chart_forecast", "Forecast"),
             legendrank=2,
             mode="lines",
             line={"color": "#25B899" if dark_mode else "#078B72", "width": 2.1},

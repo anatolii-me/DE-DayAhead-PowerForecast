@@ -10,6 +10,9 @@ on:
       - "utils/offshore_dashboard.py"
       - "utils/offshore_day_ahead.py"
       - "utils/offshore_daily.py"
+      - "utils/offshore_simulation.py"
+      - "utils/get_installed_capacity.py"
+      - ".github/workflows/offshore-simulation.yml"
       - "utils/offshore_final_data.py"
       - "utils/offshore_utils.py"
       - ".github/workflows/offshore-daily.yml"
@@ -27,6 +30,9 @@ on:
       - "utils/offshore_dashboard.py"
       - "utils/offshore_day_ahead.py"
       - "utils/offshore_daily.py"
+      - "utils/offshore_simulation.py"
+      - "utils/get_installed_capacity.py"
+      - ".github/workflows/offshore-simulation.yml"
       - "utils/offshore_final_data.py"
       - "utils/offshore_utils.py"
       - ".github/workflows/offshore-daily.yml"
@@ -64,4 +70,6 @@ jobs:
       - name: Install model runtime
         run: python -m pip install -r requirements-offshore-final.txt
       - name: Run offshore pipeline tests
-        run: python -m unittest discover -s tests -p 'test_offshore_daily.py' -q
+        run: |
+          python -m unittest discover -s tests -p 'test_offshore_daily.py' -q
+          python -m unittest discover -s tests -p 'test_offshore_operations.py' -q
