@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import html
 import json
 import os
@@ -55,7 +56,12 @@ def get_predictions(paths: DashboardPaths, fingerprint: tuple) -> pd.DataFrame:
     return load_dashboard_predictions(paths)
 
 
-def theme_styles(dark: bool) -> str:
+def svg_uri(svg: str | bytes) -> str:
+    payload = svg.encode("utf-8") if isinstance(svg, str) else svg
+    return "data:image/svg+xml;base64," + base64.b64encode(payload).decode("ascii")
+
+
+def theme_styles(dark: bool, german: bool) -> str:
     palette = (
         {"background": "#111B19", "panel": "#1B2926", "text": "#F2F7F5", "muted": "#B3C1BC",
          "border": "#354A43", "accent": "#32C6A4", "hover": "#24453B", "input": "#21332E"}
@@ -64,6 +70,14 @@ def theme_styles(dark: bool) -> str:
          "border": "#DFE8E3", "accent": "#087E65", "hover": "#E7F4EE", "input": "#FFFFFF"}
     )
     variables = "\n".join(f"--dash-{key}: {value};" for key, value in palette.items())
+    flag_en = svg_uri((ASSET_DIR / "gb.svg").read_bytes())
+    flag_de = svg_uri((ASSET_DIR / "de.svg").read_bytes())
+    icon_color = "#B3C1BC" if dark else "#65746F"
+    sun = svg_uri(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{icon_color}" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>')
+    moon = svg_uri(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{icon_color}" stroke-width="1.8" stroke-linejoin="round"><path d="M20.5 15.5A8.5 8.5 0 0 1 8.5 3.5 8.5 8.5 0 1 0 20.5 15.5Z"/></svg>')
+    theme_label = "Anzeigemodus" if german else "Display Mode"
+    language_label = "Sprache" if german else "Language"
+    selected_flag = flag_de if german else flag_en
     return f"""
     <style>
       :root {{ {variables} }}
@@ -80,19 +94,56 @@ def theme_styles(dark: bool) -> str:
         background: var(--dash-panel); border: 1px solid var(--dash-border);
         border-radius: 14px; padding: 1.3rem 1.65rem; box-shadow: none;
       }}
-      .st-key-hero {{ padding: 1.65rem 1.9rem; }}
-      .st-key-hero h1 {{ font-size: clamp(1.8rem, 3vw, 2.55rem); line-height: 1.18;
-        letter-spacing: -0.025em; margin: 0 0 0.65rem; }}
+      .st-key-hero {{ padding: 1.65rem 1.9rem; position: relative; }}
+      .st-key-hero h1 {{ font-size: clamp(1.7rem, 3vw, 2.55rem); line-height: 1.18;
+        letter-spacing: -0.025em; margin: 0 0 0.65rem; padding: 0 3.2rem 0 0; }}
       .st-key-hero p {{ line-height: 1.55; }}
       .st-key-hero a {{ color: var(--dash-accent); text-decoration: none; }}
       .st-key-hero a:hover {{ text-decoration: underline; }}
-      .st-key-hero [data-testid="stSelectbox"] [role="group"] {{
-        background: var(--dash-input) !important;
-        border: 1px solid var(--dash-border) !important;
+      .st-key-dashboard_settings {{ position: absolute; top: 1.65rem; right: 1.8rem; z-index: 2; }}
+      .st-key-dashboard_settings button {{ position: relative; width: 2.25rem; height: 2.25rem;
+        padding: 0 !important; border: 0 !important; border-radius: 0.35rem !important;
+        background: transparent !important; box-shadow: none !important; color: var(--dash-text) !important; }}
+      .st-key-dashboard_settings button:hover {{ background: var(--dash-hover) !important; }}
+      .st-key-dashboard_settings button:focus-visible {{ outline: 2px solid var(--dash-accent) !important; }}
+      .st-key-dashboard_settings button > div {{ width: 100%; justify-content: center; }}
+      .st-key-dashboard_settings button [aria-hidden="true"] {{ display: none; }}
+      .st-key-dashboard_settings button span:has(> [data-testid="stIconMaterial"]),
+      .st-key-dashboard_settings button [data-testid="stIconMaterial"] {{
+        width: 22px !important; height: 22px !important; font-size: 22px !important;
       }}
-      .st-key-hero [data-testid="stSelectbox"] input,
-      .st-key-hero [data-testid="stSelectbox"] button {{ color: var(--dash-text) !important; }}
-      .st-key-hero [data-testid="stWidgetLabel"] p {{ color: var(--dash-muted); }}
+      .st-key-dashboard_settings button p {{ font-size: 0; width: 0; overflow: hidden; }}
+      .st-key-dashboard_settings button::after {{ content: ""; position: absolute; top: 0.35rem;
+        right: 0.35rem; width: 0.72rem; height: 0.72rem; border: 1px solid var(--dash-panel);
+        background: url("{selected_flag}") center / cover no-repeat; }}
+      [data-testid="stPopoverBody"] {{ background: var(--dash-panel) !important;
+        color: var(--dash-text) !important; border: 1px solid var(--dash-border) !important; }}
+      [data-testid="stPopoverBody"] h3,
+      [data-testid="stPopoverBody"] .st-key-display-controls p {{ color: var(--dash-text) !important; }}
+      .st-key-display-controls {{ width: min(310px, calc(100vw - 3rem)); }}
+      .st-key-display-controls [data-testid="stSelectbox"] input,
+      .st-key-display-controls [data-testid="stSelectbox"] button {{ color: var(--dash-text) !important; }}
+      .st-key-display-controls [data-testid="stSelectbox"] [role="group"] {{
+        background: var(--dash-input) !important; border: 1px solid var(--dash-border) !important;
+        min-height: 2.4rem;
+      }}
+      .st-key-display-controls [data-testid="stSelectbox"] input {{ color: var(--dash-text) !important; }}
+      .st-key-display-controls input[aria-label="{theme_label}"],
+      .st-key-display-controls input[aria-label="{language_label}"] {{
+        padding-left: 38px !important; background-repeat: no-repeat;
+        background-position: 10px center; background-size: 20px 18px;
+      }}
+      .st-key-display-controls input[aria-label="{theme_label}"] {{ background-image: url("{moon if dark else sun}"); }}
+      .st-key-display-controls input[aria-label="{language_label}"] {{ background-image: url("{selected_flag}"); }}
+      [role="listbox"][aria-label="{theme_label}"] [role="option"][data-key="0"] [data-item-hl] {{ background-image: url("{sun}"); }}
+      [role="listbox"][aria-label="{theme_label}"] [role="option"][data-key="1"] [data-item-hl] {{ background-image: url("{moon}"); }}
+      [role="listbox"][aria-label="{language_label}"] [role="option"][data-key="0"] [data-item-hl] {{ background-image: url("{flag_en}"); }}
+      [role="listbox"][aria-label="{language_label}"] [role="option"][data-key="1"] [data-item-hl] {{ background-image: url("{flag_de}"); }}
+      [role="listbox"][aria-label="{theme_label}"] [data-item-hl],
+      [role="listbox"][aria-label="{language_label}"] [data-item-hl] {{
+        padding-left: 32px; background-repeat: no-repeat; background-position: 5px center;
+        background-size: 20px 16px;
+      }}
       .stTabs [data-baseweb="tab-list"] {{
         background: var(--dash-panel); border: 1px solid var(--dash-border);
         border-radius: 11px; padding: 0.2rem 0.35rem; gap: 0.25rem;
@@ -130,10 +181,6 @@ def theme_styles(dark: bool) -> str:
         color: var(--dash-muted); text-align: left; font-weight: 400;
         font-size: 0.81rem; line-height: 1.45; overflow-wrap: anywhere; }}
       .metric-help:hover + .help-tip, .metric-help:focus + .help-tip {{ display: block; }}
-      .refit-note {{ margin: 0.55rem 0 0.7rem; padding: 0.8rem 1rem;
-        border-left: 3px solid var(--dash-accent); border-radius: 0 8px 8px 0;
-        background: var(--dash-background); color: var(--dash-muted);
-        font-size: 0.87rem; line-height: 1.5; }}
       .disclaimer {{ background: var(--dash-background); border-left: 3px solid var(--dash-accent);
         border-radius: 0 8px 8px 0; padding: 0.8rem 1rem; color: var(--dash-muted);
         font-size: 0.85rem; line-height: 1.5; margin-top: 1.2rem; }}
@@ -143,6 +190,7 @@ def theme_styles(dark: bool) -> str:
         .st-key-onshore-placeholder-panel, .st-key-solar-placeholder-panel,
         .st-key-load-placeholder-panel, .st-key-prices-placeholder-panel,
         .st-key-info-panel, .st-key-example-panel {{ padding: 1.05rem 0.9rem; }}
+        .st-key-dashboard_settings {{ top: 1.05rem; right: 0.9rem; }}
         .metric-table {{ min-width: 540px; }}
       }}
     </style>
@@ -195,25 +243,49 @@ def metric_table(metrics: pd.DataFrame, copy: dict) -> str:
 
 def render_hero(copy: dict, profiles: dict, german: bool) -> None:
     with st.container(key="hero"):
-        main, controls = st.columns([4.7, 1.3], gap="large", vertical_alignment="top")
-        with main:
-            st.markdown(f"# {copy['hero']['title']}")
-            st.markdown(copy["hero"]["bio"])
-            st.markdown(f"**{copy['hero']['update_label']}:** {copy['hero']['update_text']}")
-            links = social_links(profiles)
-            byline = copy["hero"]["byline"]
-            st.caption(f"{byline} · {links}" if links else byline)
-        with controls:
-            st.caption(copy["controls"]["language"])
-            flag, selector = st.columns([1, 4], gap="small", vertical_alignment="center")
-            with flag:
-                st.image(str(ASSET_DIR / ("de.svg" if german else "gb.svg")), width=30)
-            with selector:
-                st.selectbox(
-                    copy["controls"]["language"], ["EN", "DE"],
-                    key="dashboard_language", label_visibility="collapsed",
-                )
-            st.toggle(copy["controls"]["theme"], key="dashboard_dark_mode")
+        with st.popover(copy["controls"]["settings"], icon=":material/settings:",
+                        key="dashboard_settings"):
+            st.subheader(copy["controls"]["settings"])
+            with st.container(key="display-controls"):
+                language_label, language_choice = st.columns([1, 1.1], vertical_alignment="center")
+                with language_label:
+                    st.markdown(copy["controls"]["language"])
+                with language_choice:
+                    st.selectbox(copy["controls"]["language"], ["EN", "DE"],
+                                 format_func=lambda code: "English" if code == "EN" else "German",
+                                 key="dashboard_language", label_visibility="collapsed")
+                theme_label, theme_choice = st.columns([1, 1.1], vertical_alignment="center")
+                with theme_label:
+                    st.markdown(copy["controls"]["theme"])
+                with theme_choice:
+                    st.selectbox(copy["controls"]["theme"], [False, True],
+                                 format_func=lambda dark: "Dark" if dark else "Light",
+                                 key="dashboard_dark_mode", label_visibility="collapsed")
+        st.markdown(f"# {copy['hero']['title']}")
+        st.markdown(copy["hero"]["bio"])
+        st.markdown(hero_refit_text(copy), unsafe_allow_html=True)
+        links = social_links(profiles)
+        byline = copy["hero"]["byline"]
+        st.caption(f"{byline} · {links}" if links else byline)
+
+
+def hero_refit_text(copy: dict) -> str:
+    """Public daily-update summary from the latest published status."""
+    try:
+        status = json.loads((DATA_ROOT / "dashboard_data/status.json").read_text(encoding="utf-8"))
+        fitted_utc = pd.Timestamp(status["fitted_at_utc"]).tz_convert("UTC")
+        fitted_berlin = fitted_utc.tz_convert(BERLIN_TIMEZONE)
+        content = copy["hero"]["update_text"].format(
+            berlin=f"{fitted_berlin:%d.%m.%Y %H:%M}", utc=f"{fitted_utc:%H:%M}",
+        )
+        current_day = (pd.Timestamp(SIMULATION["logical_time"]).tz_convert(BERLIN_TIMEZONE).date()
+                       if SIMULATION else pd.Timestamp.now(tz=BERLIN_TIMEZONE).date())
+        forecast_day = pd.Timestamp(status["forecast_day"]).date()
+        if status.get("forecast_status") == "issued" and forecast_day >= current_day:
+            content += " " + copy["hero"]["forecast_day"].format(day=f"{forecast_day:%d.%m.%Y}")
+    except (OSError, KeyError, ValueError, TypeError):
+        content = copy["hero"]["update_unavailable"]
+    return f"<p class='dash-note'>{html.escape(content)}</p>"
 
 
 def render_offshore(copy: dict, dark: bool, german: bool) -> None:
@@ -257,70 +329,6 @@ def render_offshore(copy: dict, dark: bool, german: bool) -> None:
         st.plotly_chart(figure, width="stretch",
                         config={"displaylogo": False, "displayModeBar": False, "scrollZoom": True})
         st.caption(copy["offshore"]["chart_help"])
-        st.caption(copy["offshore"]["schedule_note"])
-        status_path = DATA_ROOT / "dashboard_data/status.json"
-        if status_path.exists():
-            try:
-                status = json.loads(status_path.read_text(encoding="utf-8"))
-                updated = pd.Timestamp(status["last_updated_utc"]).tz_convert(BERLIN_TIMEZONE)
-                fitted = (pd.Timestamp(status["fitted_at_utc"]).tz_convert(BERLIN_TIMEZONE)
-                          if status.get("fitted_at_utc") else None)
-                actual = (pd.Timestamp(status["latest_actual_utc"]).tz_convert(BERLIN_TIMEZONE)
-                          if status.get("latest_actual_utc") else None)
-                status_text = copy["offshore"]["status_note"].format(
-                    updated=f"{updated:%d.%m.%Y %H:%M %Z}",
-                    fitted=f"{fitted:%d.%m.%Y %H:%M %Z}" if fitted is not None else "—",
-                    actual=f"{actual:%d.%m.%Y %H:%M %Z}" if actual is not None else "—",
-                )
-                st.markdown(f"<div class='refit-note'>{html.escape(status_text)}</div>",
-                            unsafe_allow_html=True)
-                if status.get("forecast_status") == "weather_unavailable":
-                    st.warning(copy["offshore"]["weather_unavailable"].format(day=status["forecast_day"]))
-                elif status.get("forecast_status") == "bootstrap_only":
-                    st.info(copy["offshore"]["bootstrap_only"])
-                elif status.get("forecast_status") == "deadline_missed":
-                    st.warning(copy["offshore"]["deadline_missed"].format(day=status["forecast_day"]))
-                elif status.get("forecast_status") in {"model_unavailable", "fit_failed"}:
-                    st.warning(copy["offshore"]["model_unavailable"].format(day=status["forecast_day"]))
-                elif status.get("fit_mode") == "reused":
-                    key = ("model_reused_generation" if status.get("training_data_status") == "ENTSO-E generation incomplete"
-                           else "model_reused_other")
-                    st.info(copy["offshore"][key].format(
-                        age=status["model_age_days"], day=status["forecast_day"]))
-                log_path = DATA_ROOT / "dashboard_data/run_logs" / f"{status.get('issue_day', updated.date())}.json"
-                if log_path.exists():
-                    with st.expander(copy["offshore"]["run_log_label"]):
-                        st.json(json.loads(log_path.read_text(encoding="utf-8")))
-            except (KeyError, ValueError, TypeError):
-                st.warning(copy["offshore"]["status_unavailable"])
-        else:
-            st.caption(copy["offshore"]["status_unavailable"])
-        if forward is None:
-            st.markdown(
-                f"<p class='dash-note'>{html.escape(copy['offshore']['forward_unavailable'])}</p>",
-                unsafe_allow_html=True,
-            )
-        else:
-            first = forward.iloc[0]
-            fitted = first.fitted_at_utc.tz_convert(BERLIN_TIMEZONE)
-            train_start = first.training_start_utc.tz_convert(BERLIN_TIMEZONE)
-            last_train_point = (
-                first.training_end_exclusive_utc - pd.Timedelta(minutes=15)
-            ).tz_convert(BERLIN_TIMEZONE)
-            forecast_day = forward.index.min().tz_convert(BERLIN_TIMEZONE).date()
-            st.caption(copy["offshore"]["shading_note"])
-            details = (
-                f"{copy['offshore']['refit_label']}: {fitted:%d.%m.%Y %H:%M %Z} · "
-                f"{copy['offshore']['training_range_label']}: "
-                f"{train_start:%d.%m.%Y %H:%M}–{last_train_point:%d.%m.%Y %H:%M} "
-                f"({BERLIN_TIMEZONE}) · {copy['offshore']['forecast_day_label']}: "
-                f"{forecast_day:%d.%m.%Y}"
-            )
-            dropped_days = str(first.get("dropped_train_days", "")).strip()
-            if dropped_days:
-                details += f" · {copy['offshore']['dropped_days_label']}: {dropped_days}"
-            st.markdown(f"<div class='refit-note'>{html.escape(details)}</div>",
-                        unsafe_allow_html=True)
         st.subheader(copy["offshore"]["metrics_title"])
         st.markdown(metric_table(metrics, copy), unsafe_allow_html=True)
         st.caption(copy["offshore"]["metrics_note"])
@@ -355,7 +363,7 @@ def main() -> None:
     german = language == "DE"
     copy = read_toml(CONTENT_DIR / ("de.toml" if german else "en.toml"))
     profiles = read_toml(CONTENT_DIR / "links.toml")["profiles"]
-    st.markdown(theme_styles(dark), unsafe_allow_html=True)
+    st.markdown(theme_styles(dark, german), unsafe_allow_html=True)
     render_hero(copy, profiles, german)
     st.write("")
     forecast, general, example = st.tabs([

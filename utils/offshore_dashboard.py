@@ -507,7 +507,7 @@ def build_forecast_figure(
     start = last_day - pd.DateOffset(days=6)
     end = last_day + pd.DateOffset(days=1)
     foreground = "#F3F7F6" if dark_mode else "#1B2524"
-    grid = "#344644" if dark_mode else "#E2E9E7"
+    grid = "#263A33" if dark_mode else "#B8C8C0"
     surface = "#182422" if dark_mode else "#FFFFFF"
     labels = labels or {}
 
@@ -519,7 +519,7 @@ def build_forecast_figure(
             name=labels.get("chart_actual", "Actual"),
             legendrank=1,
             mode="lines",
-            line={"color": "#687573" if dark_mode else "#43504E", "width": 1.6},
+            line={"color": "#C0CBC7" if dark_mode else "#43504E", "width": 1.6},
             connectgaps=False,
             hovertemplate=("%{x|%d %b %Y, %H:%M}<br>"
                            + labels.get("chart_actual_hover", "Actual")
@@ -528,27 +528,31 @@ def build_forecast_figure(
     )
     observed = predictions.actual_mw.dropna()
     if not observed.empty:
+        cutoff = (observed.index.max() + pd.Timedelta(minutes=15)).tz_convert(BERLIN_TIMEZONE)
         figure.add_vline(
-            x=(observed.index.max() + pd.Timedelta(minutes=15)).tz_convert(BERLIN_TIMEZONE),
-            line_color="#C68430" if dark_mode else "#A76512",
+            x=cutoff,
+            line_color="#87938E" if dark_mode else "#929F99",
             line_width=1.5, line_dash="dash",
-            annotation_text=labels.get("chart_cutoff", "Last Update"),
-            annotation_position="top left",
         )
     if has_forward:
         target_day = forward.index.min().tz_convert(BERLIN_TIMEZONE).normalize()
         issue_day = target_day - pd.DateOffset(days=1)
-        band = "#B7C0BD" if dark_mode else "#778581"
+        refit_band = "#4C6659" if dark_mode else "#EEF3EF"
+        delivery_band = "#354B42" if dark_mode else "#DCE6E0"
         today_start = max(issue_day, (observed.index.max() + pd.Timedelta(minutes=15)).tz_convert(BERLIN_TIMEZONE)) if not observed.empty else issue_day
         figure.add_vrect(
-            x0=min(today_start, target_day), x1=target_day, fillcolor=band, opacity=0.10,
+            x0=min(today_start, target_day), x1=target_day, fillcolor=refit_band, opacity=1,
             line_width=0, layer="below",
-            annotation_text=labels.get("chart_today", "Today"), annotation_position="top left",
         )
         figure.add_vrect(
             x0=target_day, x1=target_day + pd.DateOffset(days=1),
-            fillcolor=band, opacity=0.18, line_width=0, layer="below",
-            annotation_text=labels.get("chart_delivery", "Delivery Date"), annotation_position="top left",
+            fillcolor=delivery_band, opacity=1, line_width=0, layer="below",
+        )
+    if not observed.empty:
+        figure.add_annotation(
+            x=cutoff, y=1, yref="paper", text=labels.get("chart_cutoff", "Last Update"),
+            showarrow=False, xanchor="right", yanchor="top", xshift=-7, yshift=-5,
+            font={"size": 12, "color": foreground},
         )
     figure.add_trace(
         go.Scatter(
@@ -564,12 +568,24 @@ def build_forecast_figure(
                            + ": %{y:,.0f} MW<extra></extra>"),
         )
     )
+    if has_forward:
+        for rank, color, name in (
+            (3, refit_band, labels.get("chart_refit_band", "Refit day")),
+            (4, delivery_band, labels.get("chart_delivery_band", "Delivery day")),
+        ):
+            figure.add_trace(go.Scatter(
+                x=[None], y=[None], mode="markers", name=name, legendrank=rank,
+                marker={"symbol": "square", "size": 12, "color": color,
+                        "line": {"color": grid, "width": 1}},
+                hoverinfo="skip", showlegend=True,
+            ))
     figure.update_layout(
         template="plotly_dark" if dark_mode else "plotly_white",
         height=500,
         margin={"l": 28, "r": 20, "t": 20, "b": 20, "autoexpand": True},
         hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0,
+                "font": {"color": foreground}},
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor=surface,
         font={"color": foreground},
@@ -582,9 +598,11 @@ def build_forecast_figure(
         rangeslider={"visible": True, "thickness": 0.08, "bgcolor": surface, "bordercolor": grid},
         showgrid=True,
         gridcolor=grid,
+        tickfont={"color": foreground},
     )
     figure.update_yaxes(
         title=labels.get("chart_y_axis", "Generation (MW)"), rangemode="tozero",
         tickformat=",.0f", gridcolor=grid,
+        tickfont={"color": foreground}, title_font={"color": foreground},
     )
     return figure

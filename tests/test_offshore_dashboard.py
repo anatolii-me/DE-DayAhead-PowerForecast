@@ -190,10 +190,14 @@ class OffshoreDashboardTests(unittest.TestCase):
                 "actual_mw": 3500.0, "prediction_mw": 3600.0,
             }, index=evaluated_index)
             figure = build_forecast_figure(evaluated, forward=forward)
-            self.assertEqual(len(figure.data), 2)
-            self.assertEqual([trace.name for trace in figure.data], ["Actual", "Forecast"])
+            self.assertEqual([trace.name for trace in figure.data],
+                             ["Actual", "Forecast", "Refit day", "Delivery day"])
             self.assertEqual(sum(pd.notna(figure.data[1].y)), 192)
             self.assertEqual(len(figure.layout.shapes), 3)
+            self.assertEqual(figure.data[2].marker.color, figure.layout.shapes[1].fillcolor)
+            self.assertEqual(figure.data[3].marker.color, figure.layout.shapes[2].fillcolor)
+            self.assertEqual(figure.data[2].marker.color, "#EEF3EF")
+            self.assertEqual(figure.layout.annotations[0].font.color, "#1B2524")
             self.assertIsNone(load_forward_predictions(
                 paths, now=pd.Timestamp("2026-01-22 10:00", tz="Europe/Berlin")
             ))
