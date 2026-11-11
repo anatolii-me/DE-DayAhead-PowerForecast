@@ -1,11 +1,13 @@
 {
-  "last_updated_utc": "2026-11-09 17:24:03.191872+00:00",
-  "fitted_at_utc": "2026-11-09 17:24:02.814532+00:00",
-  "latest_actual_utc": "2026-11-08 22:45:00+00:00",
-  "forecast_day": "2026-11-10",
-  "forecast_status": "bootstrap_only",
-  "fit_mode": null,
-  "model_age_days": null,
+  "simulation": false,
+  "issue_day": "2026-11-11",
+  "last_updated_utc": "2026-11-11 08:41:16.406993+00:00",
+  "fitted_at_utc": "2026-11-11 08:41:13.197789+00:00",
+  "latest_actual_utc": "2026-11-11 08:00:00+00:00",
+  "forecast_day": "2026-11-12",
+  "forecast_status": "issued",
+  "fit_mode": "fresh",
+  "model_age_days": 0,
   "training_data_status": "complete",
   "failure_reason": null
 }
