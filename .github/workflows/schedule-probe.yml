@@ -1,0 +1,27 @@
+name: Schedule delivery probe
+
+on:
+  # Temporary one-day diagnostic. Remove after checking the scheduled runs.
+  schedule:
+    - cron: "13,21,29 8 11 11 *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report event delivery
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "event=$EVENT_NAME"
+          echo "schedule=$EVENT_SCHEDULE"
+          echo "branch=$REF_NAME"
+          date -u '+started_utc=%Y-%m-%dT%H:%M:%SZ'
+          TZ=Europe/Berlin date '+started_berlin=%Y-%m-%dT%H:%M:%S%z'
