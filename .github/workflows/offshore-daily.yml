@@ -2,8 +2,8 @@ name: Offshore daily forecast
 
 on:
   schedule:
-    - cron: "0,15,30,45 5-10 * * *"
-    - cron: "35 9,10 * * *"
+    - cron: "7,23,39,55 5-10 * * *"
+    - cron: "47 9,10 * * *"
   workflow_dispatch:
 
 permissions:
