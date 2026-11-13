@@ -1,13 +1,13 @@
 {
   "simulation": false,
   "issue_day": "2026-11-13",
-  "last_updated_utc": "2026-11-13 05:31:39.720190+00:00",
-  "fitted_at_utc": "2026-11-12 05:51:58.724063+00:00",
-  "latest_actual_utc": "2026-11-12 22:45:00+00:00",
+  "last_updated_utc": "2026-11-13 05:53:01.787994+00:00",
+  "fitted_at_utc": "2026-11-13 05:52:58.679269+00:00",
+  "latest_actual_utc": "2026-11-13 05:15:00+00:00",
   "forecast_day": "2026-11-14",
-  "forecast_status": "weather_unavailable",
-  "fit_mode": null,
-  "model_age_days": null,
+  "forecast_status": "issued",
+  "fit_mode": "fresh",
+  "model_age_days": 0,
   "training_data_status": "complete",
-  "failure_reason": "The current ECMWF midnight run is unavailable; retry within the morning window."
+  "failure_reason": null
 }
