@@ -2,8 +2,8 @@ name: Schedule delivery probe
 
 on:
   # Temporary one-day diagnostic. Remove after checking the scheduled runs.
-  schedule:
-    - cron: "13,21,29 8 11 11 *"
+  # schedule:
+  #   - cron: "13,21,29 8 11 11 *"
   workflow_dispatch:
 
 permissions:

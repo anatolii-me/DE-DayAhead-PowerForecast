@@ -1,9 +1,11 @@
 name: Offshore daily forecast
 
 on:
-  schedule:
-    - cron: "7,23,39,55 5-10 * * *"
-    - cron: "47 9,10 * * *"
+  # The internal schedule via GitHub Actions is currently disabled due to unreliable execution.
+  # Daily update triggers have been moved to an external service (cron-job.org via workflow_dispatch).
+  # schedule:
+  #   - cron: "7,23,39,55 5-10 * * *"
+  #   - cron: "47 9,10 * * *"
   workflow_dispatch:
 
 permissions:
