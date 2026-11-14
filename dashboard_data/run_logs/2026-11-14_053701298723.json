@@ -1,0 +1,74 @@
+{
+  "issue_day": "2026-11-14",
+  "forecast_day": "2026-11-15",
+  "started_at_utc": "2026-11-14 05:33:47.186389+00:00",
+  "retry_minutes": 15,
+  "cutoff_local": "11:30 Europe/Berlin",
+  "attempts": [
+    {
+      "source": "ECMWF midnight run",
+      "at_utc": "2026-11-14 05:37:01.069642+00:00",
+      "outcome": "ValueError"
+    }
+  ],
+  "completed_at_utc": "2026-11-14 05:37:01.296807+00:00",
+  "simulation": false,
+  "source_events": [
+    {
+      "source": "capacity",
+      "day": "2026-11-14",
+      "status": "updated"
+    },
+    {
+      "source": "generation",
+      "day": "2026-11-07",
+      "status": "received 96/96"
+    },
+    {
+      "source": "generation",
+      "day": "2026-11-08",
+      "status": "received 96/96"
+    },
+    {
+      "source": "generation",
+      "day": "2026-11-09",
+      "status": "received 96/96"
+    },
+    {
+      "source": "generation",
+      "day": "2026-11-10",
+      "status": "received 96/96"
+    },
+    {
+      "source": "generation",
+      "day": "2026-11-11",
+      "status": "received 96/96"
+    },
+    {
+      "source": "generation",
+      "day": "2026-11-12",
+      "status": "received 96/96"
+    },
+    {
+      "source": "generation",
+      "day": "2026-11-13",
+      "status": "received 96/96"
+    },
+    {
+      "source": "weather",
+      "day": "2026-06-24",
+      "status": "ValueError"
+    }
+  ],
+  "result": "weather_unavailable",
+  "fit_mode": null,
+  "training_data_status": "complete",
+  "model_fitted_at_utc": "2026-11-13 05:52:58.679269+00:00",
+  "training_start_utc": "2025-11-12 23:00:00+00:00",
+  "training_end_exclusive_utc": "2026-11-12 23:00:00+00:00",
+  "train_rows": 34944,
+  "dropped_train_days": [
+    "2026-06-24"
+  ],
+  "failure_reason": "The current ECMWF midnight run is unavailable; retry within the morning window."
+}
