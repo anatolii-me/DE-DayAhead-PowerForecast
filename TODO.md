@@ -8,6 +8,12 @@
 ---
 
 ## Future Plans
+
+### Offshore Wind Model
+- [ ] Incorporate baseline metrics for onshore wind and solar, along with projected load (when ready), into the data sources to gain insight into the expected saturation of the entire grid. This could help mitigate the issue of overestimating offshore wind forecasts.
+- [ ] Try to obtain reliable data on scheduled wind farm outages—information that was historically available up until 12:00 Berlin time on the day prior (D-1).
+
+### General
 - [ ] Full development cycle for an onshore wind model
 - [ ] Full development cycle for a solar model
 - [ ] Full development cycle for a price model
