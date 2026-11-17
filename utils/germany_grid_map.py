@@ -1,26 +1,23 @@
 """
 germany_grid_map.py
 ===============
-Генерирует словарь равноудалённых географических точек, покрывающих всю
-территорию Германии.
+Generate a dictionary of evenly spaced points across Germany.
  
-Использование
--------------
-    from germany_grid import generate_germany_grid
+Usage
+-----
+    from utils.germany_grid_map import generate_germany_grid, visualize_grid
  
     points = generate_germany_grid(n_points=500)
-    # {1: [longitude, latitude, "Bavaria"], 2: [...], ...}
- 
-Алгоритм
---------
-1. Скачивается GeoJSON границ 16 федеральных земель.
-2. Строится гексагональная сетка с шагом spacing_km в метрической проекции
-   EPSG:3035 (ETRS89-LAEA Europe — равновеликая проекция для Европы,
-   расстояния в метрах без искажений).
-3. Точки внутри полигона Германии отбираются и приводятся обратно к WGS84.
-4. Если точек оказалось больше/меньше n_points, шаг пересчитывается и
-   итерация повторяется (бинарный поиск) — до тех пор, пока не будет
-   достигнута нужная плотность.
+    # {1: [longitude, latitude, "Bayern"], 2: [...], ...}
+    visualize_grid(points, output_path="germany_grid.html")
+
+How it works
+------------
+1. Download GeoJSON boundaries for Germany's 16 federal states.
+2. Build a hexagonal grid in the EPSG:3035 metric projection.
+3. Keep points inside Germany and convert them to WGS84 coordinates.
+4. Adjust the grid spacing with a binary search until the number of points
+   is close to n_points.
 """
  
 from __future__ import annotations
@@ -36,10 +33,11 @@ from shapely.ops import unary_union, transform as shapely_transform
 import pyproj
 
 import folium
+from branca.element import Figure
  
  
 # ---------------------------------------------------------------------------
-# Константы
+# Constants
 # ---------------------------------------------------------------------------
  
 _STATES_URL = (
@@ -47,7 +45,7 @@ _STATES_URL = (
     "main/2_bundeslaender/4_niedrig.geo.json"
 )
  
-# Равновеликая проекция Европы (единицы — метры)
+# Equal-area projection for Europe (coordinates in meters).
 _PROJ_METRIC = pyproj.CRS("EPSG:3035")
 _PROJ_WGS84  = pyproj.CRS("EPSG:4326")
  
@@ -56,20 +54,20 @@ _transformer_to_wgs84   = pyproj.Transformer.from_crs(_PROJ_METRIC, _PROJ_WGS84,
  
  
 # ---------------------------------------------------------------------------
-# Загрузка данных
+# Load boundary data
 # ---------------------------------------------------------------------------
  
 def _load_states_geojson(url: str = _STATES_URL) -> dict:
-    """Скачивает (или берёт из кеша в памяти) GeoJSON федеральных земель."""
+    """Download the federal state boundaries as GeoJSON."""
     with urllib.request.urlopen(url, timeout=30) as resp:
         return json.loads(resp.read().decode())
  
  
 def _build_state_index(geojson: dict) -> tuple[BaseGeometry, list[tuple[str, BaseGeometry]]]:
     """
-    Возвращает:
-      - germany_poly  : объединённый полигон Германии (метрическая проекция)
-      - state_polys   : список (name, polygon_in_metric)
+    Return the combined Germany polygon and a list of state polygons.
+
+    All polygons use the metric projection.
     """
     state_polys: list[tuple[str, BaseGeometry]] = []
  
@@ -90,24 +88,25 @@ def _build_state_index(geojson: dict) -> tuple[BaseGeometry, list[tuple[str, Bas
  
  
 # ---------------------------------------------------------------------------
-# Генерация сетки
+# Build the grid
 # ---------------------------------------------------------------------------
  
 def _hex_grid_points(germany_poly, spacing_m: float) -> list[tuple[float, float]]:
     """
-    Строит гексагональную сетку с шагом spacing_m (в метрах) и возвращает
-    список (x, y) точек внутри germany_poly.
-    Гексагональная укладка даёт более равномерное покрытие, чем прямоугольная.
+    Return hexagonal grid points inside germany_poly.
+
+    spacing_m is the horizontal distance between points, in meters.
+    Staggered rows provide more even coverage than a square grid.
     """
     minx, miny, maxx, maxy = germany_poly.bounds
  
-    row_height = spacing_m * math.sqrt(3) / 2  # вертикальный шаг гексагона
+    row_height = spacing_m * math.sqrt(3) / 2  # Vertical distance between rows.
  
     points = []
     row = 0
     y = miny
     while y <= maxy + row_height:
-        # чётные/нечётные ряды смещены на половину шага
+        # Shift every second row by half the horizontal spacing.
         x_offset = 0.5 * spacing_m if (row % 2 == 1) else 0.0
         x = minx + x_offset
         while x <= maxx + spacing_m:
@@ -125,11 +124,12 @@ def _spacing_for_n_points(germany_poly, n_points: int,
                            tol: float = 0.02,
                            max_iter: int = 40) -> float:
     """
-    Бинарным поиском находит шаг сетки (в метрах), при котором количество
-    точек внутри Германии близко к n_points (±tol*100 %).
+    Find grid spacing, in meters, that gives about n_points points.
+
+    The target range is within tol * 100 percent of n_points.
     """
-    # Грубая начальная оценка через площадь
-    area_m2 = germany_poly.area          # ~357 000 км²
+    # Estimate spacing from Germany's area.
+    area_m2 = germany_poly.area          # About 357,000 km².
     spacing_est = math.sqrt(area_m2 / n_points) * 1.05
  
     lo, hi = spacing_est * 0.2, spacing_est * 5.0
@@ -147,15 +147,15 @@ def _spacing_for_n_points(germany_poly, n_points: int,
             return mid
  
         if got > n_points:
-            lo = mid   # шаг маловат → увеличиваем нижнюю границу
+            lo = mid   # Too many points: increase the spacing.
         else:
-            hi = mid   # шаг велик   → уменьшаем верхнюю границу
+            hi = mid   # Too few points: decrease the spacing.
  
     return (lo + hi) / 2
  
  
 # ---------------------------------------------------------------------------
-# Определение принадлежности к земле
+# Assign each point to a state
 # ---------------------------------------------------------------------------
  
 def _assign_states(
@@ -163,9 +163,9 @@ def _assign_states(
     state_polys: list[tuple[str, BaseGeometry]],
 ) -> list[Optional[str]]:
     """
-    Для каждой точки (x, y) в метрической проекции возвращает название
-    федеральной земли или None (не должно происходить после фильтрации по
-    germany_poly, но на стыках границ возможно).
+    Return the federal state name for each point in metric coordinates.
+
+    A point on a shared border can be assigned to either neighboring state.
     """
     labels = []
     for x, y in metric_points:
@@ -175,7 +175,7 @@ def _assign_states(
             if poly.contains(pt) or poly.touches(pt):
                 label = name
                 break
-        # запасной вариант: ближайший полигон
+        # Use the nearest state if no polygon contains or touches the point.
         if label is None:
             min_dist = float("inf")
             for name, poly in state_polys:
@@ -188,7 +188,7 @@ def _assign_states(
  
  
 # ---------------------------------------------------------------------------
-# Публичная функция
+# Public function
 # ---------------------------------------------------------------------------
  
 def generate_germany_grid(
@@ -197,53 +197,53 @@ def generate_germany_grid(
     states_url: str = _STATES_URL,
 ) -> dict[int, list]:
     """
-    Генерирует словарь равноудалённых точек, покрывающих всю Германию.
+    Generate a dictionary of evenly spaced points across Germany.
  
-    Параметры
-    ---------
-    n_points : int
-        Желаемое количество точек. Итоговое число может отличаться в пределах
-        ±(tol*100) % из-за дискретности сетки.
-    tol : float
-        Допустимое относительное отклонение от n_points (по умолчанию 3 %).
-    states_url : str
-        URL GeoJSON федеральных земель (можно передать локальный путь).
- 
-    Возвращает
+    Parameters
     ----------
+    n_points : int
+        Target number of points. The result may differ because grid sizes
+        change in discrete steps.
+    tol : float
+        Allowed relative difference from n_points (default: 3%).
+    states_url : str
+        URL of the federal state boundaries in GeoJSON format.
+ 
+    Returns
+    -------
     dict
         {
-            1: [longitude, latitude, "Bavaria"],
-            2: [longitude, latitude, "North Rhine-Westphalia"],
+            1: [longitude, latitude, "Bayern"],
+            2: [longitude, latitude, "Nordrhein-Westfalen"],
             ...
         }
-        Координаты в WGS84 (десятичные градусы).
+        Coordinates use WGS84 decimal degrees. State names are in German.
     """
     if n_points < 1:
-        raise ValueError("n_points должен быть >= 1")
+        raise ValueError("n_points must be >= 1")
  
-    print(f"[germany_grid] Загрузка границ федеральных земель...")
+    print("[germany_grid] Loading federal state boundaries...")
     geojson = _load_states_geojson(states_url)
     germany_poly, state_polys = _build_state_index(geojson)
  
-    print(f"[germany_grid] Подбор шага сетки для ~{n_points} точек...")
+    print(f"[germany_grid] Finding grid spacing for about {n_points} points...")
     spacing_m = _spacing_for_n_points(germany_poly, n_points, tol=tol)
     spacing_km = spacing_m / 1000
-    print(f"[germany_grid] Шаг сетки: {spacing_km:.2f} км")
+    print(f"[germany_grid] Grid spacing: {spacing_km:.2f} km")
  
     metric_pts = _hex_grid_points(germany_poly, spacing_m)
-    print(f"[germany_grid] Сгенерировано точек внутри Германии: {len(metric_pts)}")
+    print(f"[germany_grid] Points inside Germany: {len(metric_pts)}")
  
-    print(f"[germany_grid] Определение федеральных земель...")
+    print("[germany_grid] Assigning points to federal states...")
     labels = _assign_states(metric_pts, state_polys)
  
-    # Перевод обратно в WGS84
+    # Convert coordinates back to WGS84.
     result: dict[int, list] = {}
     for idx, ((x, y), label) in enumerate(zip(metric_pts, labels), start=1):
         lon, lat = _transformer_to_wgs84.transform(x, y)
         result[idx] = [round(lon, 6), round(lat, 6), label]
  
-    print(f"[germany_grid] Готово. Итого точек: {len(result)}")
+    print(f"[germany_grid] Done. Total points: {len(result)}")
     return result
  
  
@@ -255,10 +255,10 @@ if __name__ == "__main__":
     import sys
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 300
     pts = generate_germany_grid(n_points=n)
-    # Вывод первых 10 для проверки
+    # Show the first 10 points for a quick check.
     for k, v in list(pts.items())[:10]:
         print(f"  {k}: lon={v[0]}, lat={v[1]}, state={v[2]}")
-    print(f"  ... всего {len(pts)} точек")
+    print(f"  ... {len(pts)} points in total")
 
 
     
@@ -271,20 +271,21 @@ def visualize_grid(
     open_browser: bool = False,
 ) -> str:
     """
-    Визуализирует словарь точек на интерактивной карте и сохраняет HTML.
+    Save an interactive HTML map of the grid points and Europe.
 
-    Параметры
-    ---------
-    points : dict
-        Словарь вида {id: [lon, lat, state_name]} из generate_germany_grid().
-    output_path : str
-        Путь для сохранения HTML-файла.
-    open_browser : bool
-        Открыть браузер автоматически после генерации.
-
-    Возвращает
+    Parameters
     ----------
-    str : абсолютный путь к сохранённому файлу.
+    points : dict
+        Dictionary of {id: [lon, lat, state_name]} from generate_germany_grid().
+    output_path : str
+        Path for the output HTML file.
+    open_browser : bool
+        Open the saved file in a browser after creating it.
+
+    Returns
+    -------
+    str
+        Absolute path to the saved HTML file.
     """
     import colorsys, hashlib, webbrowser
     from pathlib import Path
@@ -317,10 +318,81 @@ def visualize_grid(
             return "#{:02x}{:02x}{:02x}".format(int(r*255), int(g*255), int(b*255))
         return "#888888"
 
-    m = folium.Map(location=[51.1657, 10.4515], zoom_start=6,
-                   tiles="CartoDB positron", control_scale=True)
+    # Embed state boundaries in the HTML to avoid external tile servers.
+    # Source: _STATES_URL (Unlicense).
+    states_path = Path(__file__).resolve().parent / "germany_states_low.geojson"
+    with states_path.open(encoding="utf-8") as f:
+        states_geojson = json.load(f)
+    # Natural Earth 1:50m country boundaries for Europe and nearby countries.
+    # Source: https://github.com/nvkelso/natural-earth-vector (public domain).
+    countries_path = Path(__file__).resolve().parent / "europe_countries.geojson"
+    with countries_path.open(encoding="utf-8") as f:
+        countries_geojson = json.load(f)
 
-    # Слои по землям
+    m = folium.Map(location=[51.1657, 10.4515], zoom_start=6,
+                   tiles=None, control_scale=True)
+    root = m.get_root()
+    if not isinstance(root, Figure):
+        raise TypeError("Expected a Folium Figure as the map root")
+    root.header.add_child(folium.Element(
+        "<style>.leaflet-container { background: #edf3f8; }"
+        "path.leaflet-interactive:focus { outline: none !important; }"
+        ".country-label { color: #52616b; font: 600 13px Arial, sans-serif; "
+        "text-align: center; white-space: nowrap; text-shadow: 0 1px white, "
+        "1px 0 white, 0 -1px white, -1px 0 white; }</style>"
+    ))
+    folium.GeoJson(
+        countries_geojson,
+        name="European countries",
+        style_function=lambda _: {
+            "fillColor": "#e4e9dd", "fillOpacity": 1,
+            "color": "#aab6aa", "weight": 1.5,
+        },
+        tooltip=folium.GeoJsonTooltip(fields=["name"], aliases=["Country:"]),
+    ).add_to(m)
+    folium.GeoJson(
+        states_geojson,
+        name="State boundaries",
+        style_function=lambda _: {
+            "fillColor": "#fffdf8", "fillOpacity": 1,
+            "color": "#8c9aa5", "weight": 1,
+        },
+        tooltip=folium.GeoJsonTooltip(fields=["name"], aliases=["State:"]),
+    ).add_to(m)
+    country_labels = {
+        "Ireland": (53.2, -8.0),
+        "United Kingdom": (54.0, -3.5),
+        "Portugal": (39.5, -8.0),
+        "Spain": (40.2, -4.0),
+        "France": (46.8, 2.3),
+        "Netherlands": (52.2, 5.3),
+        "Belgium": (50.5, 4.7),
+        "Denmark": (56.2, 9.8),
+        "Norway": (62.5, 10.0),
+        "Sweden": (62.0, 16.0),
+        "Finland": (63.5, 26.0),
+        "Poland": (52.2, 19.0),
+        "Czechia": (49.8, 15.4),
+        "Austria": (47.7, 14.2),
+        "Switzerland": (46.8, 8.3),
+        "Italy": (42.8, 12.5),
+        "Romania": (45.9, 25.0),
+        "Greece": (39.5, 22.0),
+        "Turkey": (39.5, 33.0),
+    }
+    label_layer = folium.FeatureGroup(name="Country names", show=True)
+    for name, location in country_labels.items():
+        folium.Marker(
+            location=location,
+            icon=folium.DivIcon(
+                icon_size=(100, 20), icon_anchor=(50, 10),
+                html=f'<div class="country-label">{name}</div>',
+            ),
+        ).add_to(label_layer)
+    label_layer.add_to(m)
+    m.fit_bounds([[33.5, -12.0], [72.0, 45.0]], padding=(20, 20))
+
+    # Create a separate layer for each state.
     state_names = sorted({v[2] for v in points.values() if v[2]})
     layers: dict[str, folium.FeatureGroup] = {}
     for state in state_names:
@@ -339,12 +411,12 @@ def visualize_grid(
             fill_opacity=0.85,
             weight=1,
             tooltip=folium.Tooltip(
-                f"<b>#{key}</b><br>Земля: {state or '—'}<br>"
+                f"<b>#{key}</b><br>State: {state or '—'}<br>"
                 f"Lon: {lon:.5f}<br>Lat: {lat:.5f}"
             ),
         ).add_to(layers.get(state, m))
 
-    # Легенда
+    # Build the legend.
     state_counts = {}
     for v in points.values():
         s = v[2] or "—"
@@ -360,17 +432,15 @@ def visualize_grid(
     <div style="position:fixed;bottom:30px;right:10px;z-index:9999;background:white;
                 padding:12px 16px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.25);
                 font-family:Arial,sans-serif;font-size:12px;max-height:400px;overflow-y:auto">
-        <b>Германия · {len(points)} точек</b>
+        <b>Germany · {len(points)} points</b>
         <table style="margin-top:8px">{rows}</table>
     </div>"""
-    root = m.get_root()
-    assert hasattr(root, 'html'), "Folium root не имеет html"
-    root.html.add_child(folium.Element(legend))  # type: ignore[union-attr]
+    root.html.add_child(folium.Element(legend))
     folium.LayerControl(collapsed=False).add_to(m)
 
     out = Path(output_path).resolve()
     m.save(str(out))
-    print(f"[visualize_grid] Сохранено: {out}  ({len(points)} точек)")
+    print(f"[visualize_grid] Saved: {out}  ({len(points)} points)")
 
     if open_browser:
         webbrowser.open(out.as_uri())
