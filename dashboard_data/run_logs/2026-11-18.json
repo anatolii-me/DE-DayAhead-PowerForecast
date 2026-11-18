@@ -1,17 +1,17 @@
 {
   "issue_day": "2026-11-18",
   "forecast_day": "2026-11-19",
-  "started_at_utc": "2026-11-18 05:03:13.580236+00:00",
+  "started_at_utc": "2026-11-18 05:34:08.634022+00:00",
   "retry_minutes": 15,
   "cutoff_local": "11:30 Europe/Berlin",
   "attempts": [
     {
       "source": "ECMWF midnight run",
-      "at_utc": "2026-11-18 05:07:43.866382+00:00",
+      "at_utc": "2026-11-18 05:35:32.444758+00:00",
       "outcome": "ValueError"
     }
   ],
-  "completed_at_utc": "2026-11-18 05:07:44.216676+00:00",
+  "completed_at_utc": "2026-11-18 05:35:32.759205+00:00",
   "simulation": false,
   "source_events": [
     {
