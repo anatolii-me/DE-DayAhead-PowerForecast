@@ -71,13 +71,13 @@ jobs:
         if: steps.due.outputs.run == 'true'
         env:
           ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
-        run: python -m utils.offshore_daily
+        run: python -m utils.offshore.daily
       - name: Preserve source downloads, status and forecasts
         if: always() && steps.due.outputs.run == 'true'
         env:
           ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
         run: |
-          python -c "from pathlib import Path; from utils.offshore_daily import _check_public_credentials; _check_public_credentials(Path('dashboard_data'))"
+          python -c "from pathlib import Path; from utils.offshore.daily import _check_public_credentials; _check_public_credentials(Path('dashboard_data'))"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add dashboard_data
@@ -88,7 +88,7 @@ jobs:
       - name: Extend historical scores after publishing
         if: success() && steps.due.outputs.run == 'true'
         run: |
-          python -m utils.offshore_daily --offline --backtest
+          python -m utils.offshore.daily --offline --backtest
           git add dashboard_data
           if ! git diff --cached --quiet; then
             git commit -m "chore: update offshore retrospective scores"

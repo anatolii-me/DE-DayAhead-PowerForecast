@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import pandas as pd
 import streamlit as st
 
-from utils.offshore_dashboard import (
+from utils.offshore.dashboard import (
     DashboardDataError, DashboardPaths, METRIC_ORDER, WINDOW_ORDER,
     BERLIN_TIMEZONE, build_forecast_figure, format_metric,
     load_dashboard_predictions, load_forward_predictions, metric_windows,

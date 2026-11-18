@@ -43,19 +43,97 @@ The dashboard is updated from a daily forecast pipeline. Its historical scores a
 
 The forecasting pipeline automatically updates daily via GitHub Actions, combining ECMWF weather forecasts, ENTSO-E actuals, and Energy-Charts capacity data.
 
+### Shared weather collection
+
+`utils/weather.py` owns the Single Runs request, parsing and delivery-window logic.
+`fetch_offshore_weather(start_date, end_date, points=None, height=100, model="ecmwf_ifs")`
+retains the 14 sea points, column order, units and derived features used by the
+deployed model. Import weather collectors from `utils.weather`.
+
+```python
+from utils.germany_grid_map import generate_germany_grid
+from utils.weather import fetch_load_weather, fetch_weather_singleruns
+
+# PROJECT_ROOT is the repository root. Use its boundary snapshot for repeatability.
+points = generate_germany_grid(
+    n_points=20,
+    states_url=(PROJECT_ROOT / "utils/germany_states_low.geojson").as_uri(),
+)
+load_weather = fetch_load_weather("2026-01-01", "2026-01-01", points=points)
+
+# The same transport can serve an explicitly chosen onshore or solar profile.
+solar_weather = fetch_weather_singleruns(
+    "2026-01-01", "2026-01-01", points=points,
+    variables=["shortwave_radiation", "temperature_2m"], cell_selection="land",
+)
+```
+
+Dates identify **inclusive run dates**, not delivery dates: the example returns
+the forecast for 2 January in Europe/Berlin, plus one hourly buffer on each side.
+The natural key is `(point_id, datetime_run_utc, datetime_utc)`; retain the run when
+joining and interpolating. Output coordinates are the grid coordinates returned
+by the API. Save the requested coordinates separately to reproduce the selection.
+
+The load profile returns `temperature_2m` (°C), `wind_speed_10m` (m/s),
+`shortwave_radiation` (W/m², preceding-hour mean) and `cloud_cover` (%), plus the
+same seven metadata columns as offshore. These variable definitions follow the
+[Open-Meteo documentation](https://open-meteo.com/en/docs/ecmwf-api).
+The new interfaces reject failed, incomplete or non-finite runs by default;
+`errors="skip"` explicitly allows gaps with warnings. Offshore retains its
+existing recovery policy: fetch available data, validate all 14 points and hours
+in the pipeline, then retry in two smaller batches if necessary.
+
+The actual offshore implementation now lives under `utils/offshore/`:
+`daily`, `day_ahead`, `dashboard`, `simulation`, `final_data`, `final_features`,
+`final_evaluation`, `final_baselines`, `final_plot`, `cf_diagnostics`, and `points`.
+Import these modules directly, for example `from utils.offshore import final_data`.
+The top-level compatibility files have been removed; notebooks, tests and
+workflow commands use the package paths.
+
+Run the daily pipeline with `python -m utils.offshore.daily`. The daily workflow
+uses this command. Its filename, `workflow_dispatch` and schedule remain
+unchanged so external dispatchers can continue to trigger it. Moving
+source files changes the source hashes used by derived-feature/model caches;
+these may be recomputed once, while raw weather and published artifacts keep
+their existing paths and formats.
+
+### Environments and validation
+
+Use Python 3.13 and install the requirements for the task:
+
+| Task | Requirements | Entry point |
+| --- | --- | --- |
+| Display dashboard | `requirements-dashboard.txt` | `streamlit run dashboard.py` |
+| Offshore daily forecasting and evaluation | `requirements-offshore-final.txt` | `python -m utils.offshore.daily` |
+| Load data preparation and weather grid | `requirements-load.txt` | `notebooks/research_load_model/1_data_preparation.ipynb` |
+| Full research environment | `requirements.txt` | All research notebooks and tests |
+
+The load notebook currently prepares calendar features and geographic weather
+inputs; load-model training and evaluation are not implemented yet. Its download
+cell is opt-in (`FETCH_LOAD_WEATHER = True`). A uniform geographic grid does not
+apply consumption weights to weather features.
+
+Run `python -m unittest discover -s tests -p 'test*.py' -q` in the full environment.
+Some historical offshore tests also need the local research results under
+`results/`. CI runs the self-contained dashboard, weather and operational tests,
+plus `test_load_notebook.py` in the dedicated load environment. The latter
+executes the notebook's calendar/grid code and download/export branch using a
+mock API response; it checks DST, variable values, Parquet and saved coordinates.
+The **Dashboard checks** workflow also supports manual dispatch on a branch.
+
 ### Local Developer Simulation
 
 You can run data downloads, model refits, and forecasting locally in an isolated sandbox without affecting production data:
 
 ```bash
 # Run a fresh local simulation
-python -m utils.offshore_simulation --output results/simulations/my-run
+python -m utils.offshore.simulation --output results/simulations/my-run
 
 # Replay a specific historical date
-python -m utils.offshore_simulation --issue-day 2026-11-09 --output results/simulations/replay
+python -m utils.offshore.simulation --issue-day 2026-11-09 --output results/simulations/replay
 
 # Preview simulation results in the local dashboard ([http://127.0.0.1](http://127.0.0.1))
-python -m utils.offshore_simulation --preview results/simulations/my-run
+python -m utils.offshore.simulation --preview results/simulations/my-run
 ```
 `ENTSOE_API_KEY` is read only from the local environment or the GitHub Actions secret. The pipeline checks public artifacts for the literal credential before completion. Local `.env` files are ignored by Git.
 

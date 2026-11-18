@@ -27,7 +27,7 @@ jobs:
         run: |
           args=()
           if [ -n "$ISSUE_DAY" ]; then args+=(--issue-day "$ISSUE_DAY"); fi
-          python -m utils.offshore_simulation --output results/simulations/manual "${args[@]}"
+          python -m utils.offshore.simulation --output results/simulations/manual "${args[@]}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

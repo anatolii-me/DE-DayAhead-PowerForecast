@@ -1,24 +1,25 @@
 name: Dashboard checks
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "dashboard.py"
       - ".streamlit/config.toml"
       - "dashboard_content/**"
       - "dashboard_assets/**"
-      - "utils/offshore_dashboard.py"
-      - "utils/offshore_day_ahead.py"
-      - "utils/offshore_daily.py"
-      - "utils/offshore_simulation.py"
       - "utils/get_installed_capacity.py"
       - ".github/workflows/offshore-simulation.yml"
-      - "utils/offshore_final_data.py"
-      - "utils/offshore_utils.py"
+      - "utils/weather.py"
+      - "utils/offshore/**"
       - ".github/workflows/offshore-daily.yml"
       - "tests/**"
       - "requirements-dashboard.txt"
       - "requirements-offshore-final.txt"
+      - "requirements-load.txt"
+      - "utils/germany_grid_map.py"
+      - "utils/germany_states_low.geojson"
+      - "notebooks/research_load_model/**"
       - ".github/workflows/dashboard-checks.yml"
   push:
     branches: [main]
@@ -27,18 +28,18 @@ on:
       - ".streamlit/config.toml"
       - "dashboard_content/**"
       - "dashboard_assets/**"
-      - "utils/offshore_dashboard.py"
-      - "utils/offshore_day_ahead.py"
-      - "utils/offshore_daily.py"
-      - "utils/offshore_simulation.py"
       - "utils/get_installed_capacity.py"
       - ".github/workflows/offshore-simulation.yml"
-      - "utils/offshore_final_data.py"
-      - "utils/offshore_utils.py"
+      - "utils/weather.py"
+      - "utils/offshore/**"
       - ".github/workflows/offshore-daily.yml"
       - "tests/**"
       - "requirements-dashboard.txt"
       - "requirements-offshore-final.txt"
+      - "requirements-load.txt"
+      - "utils/germany_grid_map.py"
+      - "utils/germany_states_low.geojson"
+      - "notebooks/research_load_model/**"
       - ".github/workflows/dashboard-checks.yml"
 
 jobs:
@@ -54,7 +55,7 @@ jobs:
       - name: Install dashboard dependencies
         run: python -m pip install -r requirements-dashboard.txt
       - name: Compile dashboard code
-        run: python -m compileall dashboard.py utils/offshore_dashboard.py utils/offshore_day_ahead.py
+        run: python -m compileall -q dashboard.py utils/offshore utils/weather.py
       - name: Run dashboard tests
         run: python -m unittest discover -s tests -p 'test_offshore_dashboard.py' -v
 
@@ -71,5 +72,20 @@ jobs:
         run: python -m pip install -r requirements-offshore-final.txt
       - name: Run offshore pipeline tests
         run: |
+          python -m unittest discover -s tests -p 'test_weather.py' -q
           python -m unittest discover -s tests -p 'test_offshore_daily.py' -q
           python -m unittest discover -s tests -p 'test_offshore_operations.py' -q
+
+  load-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-load.txt
+      - name: Install load preparation dependencies
+        run: python -m pip install -r requirements-load.txt
+      - name: Run load notebook integration test
+        run: python -m unittest discover -s tests -p 'test_load_notebook.py' -v
