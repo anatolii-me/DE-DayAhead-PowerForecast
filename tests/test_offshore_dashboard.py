@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from utils.offshore_dashboard import (
+from utils.offshore.dashboard import (
     DashboardDataError,
     DashboardPaths,
     build_forecast_figure,
@@ -19,8 +19,8 @@ from utils.offshore_dashboard import (
     metric_windows,
     week_ago_index,
 )
-from utils.offshore_day_ahead import capacity_for_targets, training_rows
-from utils.offshore_final_data import grid, merge_generation
+from utils.offshore.day_ahead import capacity_for_targets, training_rows
+from utils.offshore.final_data import grid, merge_generation
 
 
 class OffshoreDashboardTests(unittest.TestCase):

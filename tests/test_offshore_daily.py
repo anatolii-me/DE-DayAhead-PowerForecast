@@ -8,10 +8,10 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from utils.offshore_daily import wait_for_critical_sources
-from utils.offshore_day_ahead import issue_tomorrow_forecast
-from utils.offshore_dashboard import DashboardDataError, DashboardPaths, load_forward_predictions
-from utils.offshore_final_data import grid
+from utils.offshore.daily import wait_for_critical_sources
+from utils.offshore.day_ahead import issue_tomorrow_forecast
+from utils.offshore.dashboard import DashboardDataError, DashboardPaths, load_forward_predictions
+from utils.offshore.final_data import grid
 
 
 class RetryTests(unittest.TestCase):
@@ -79,8 +79,8 @@ class RetryTests(unittest.TestCase):
         log = {}
         with tempfile.TemporaryDirectory() as tmp, \
              patch.dict("os.environ", {"ENTSOE_API_KEY": "test-placeholder"}), \
-             patch("utils.offshore_daily.fetch_generation_day", side_effect=fetch), \
-             patch("utils.offshore_daily.current_weather", side_effect=fetch_weather):
+             patch("utils.offshore.daily.fetch_generation_day", side_effect=fetch), \
+             patch("utils.offshore.daily.current_weather", side_effect=fetch_weather):
             result, fetched_weather, ready = wait_for_critical_sources(
                 Path(tmp), partial, day, ["feature"], log,
                 clock=lambda: current[0], sleep=advance)
@@ -103,7 +103,7 @@ class RetryTests(unittest.TestCase):
 
         log = {}
         with tempfile.TemporaryDirectory() as tmp, \
-             patch("utils.offshore_daily.current_weather", side_effect=TimeoutError("unavailable")):
+             patch("utils.offshore.daily.current_weather", side_effect=TimeoutError("unavailable")):
             _, fetched_weather, ready = wait_for_critical_sources(
                 Path(tmp), generation, day, ["feature"], log,
                 clock=lambda: current[0], sleep=advance)

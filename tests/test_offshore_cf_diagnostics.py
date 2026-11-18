@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 import pandas as pd
-from utils.offshore_cf_diagnostics import paired_errors, bin_metrics, mix_comparison
+from utils.offshore.cf_diagnostics import paired_errors, bin_metrics, mix_comparison
 
 
 class TargetMixTests(unittest.TestCase):

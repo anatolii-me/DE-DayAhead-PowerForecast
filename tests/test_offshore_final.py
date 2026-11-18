@@ -8,8 +8,8 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from utils import offshore_final_data as data
-from utils import offshore_final_evaluation as evaluation
+from utils.offshore import final_data as data
+from utils.offshore import final_evaluation as evaluation
 
 ROOT = Path(__file__).resolve().parents[1]
 SELECTION_DIR = ROOT / 'results/offshore_joint_loss_hpo/c550de332f450772dce8/selection_d2085702a714cb374154'
@@ -61,7 +61,7 @@ class PipelineTests(unittest.TestCase):
         np.testing.assert_allclose(actual.mae_mean.sort_index(), expected.mae_mean.sort_index(), rtol=1e-12)
 
     def test_notebook4_baselines_cover_matching_historical_periods(self):
-        from utils import offshore_final_baselines as baselines
+        from utils.offshore import final_baselines as baselines
         baseline_selection = baselines.baseline_selection(self.selection)
         previous = baselines.load_previous_predictions(SELECTION_DIR, self.selection)
         self.assertEqual(set(previous.model), {'CatBoost', 'LightGBM', 'XGBoost'})
@@ -140,7 +140,7 @@ class PipelineTests(unittest.TestCase):
             data.weather_features(raw, '2025-05-01')
 
     def test_chart_gaps_include_trailing_days_and_multiple_reasons(self):
-        from utils.offshore_final_plot import prediction_chart
+        from utils.offshore.final_plot import prediction_chart
         previous = evaluation.load_previous_predictions(SELECTION_DIR, self.selection)
         dataset = self.original.copy()
         dataset.index = pd.to_datetime(dataset.index, utc=True)
@@ -163,7 +163,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(gaps.label.iloc[2], 'Insufficient training history')
 
     def test_short_gap_labels(self):
-        from utils.offshore_final_plot import short_gap_label
+        from utils.offshore.final_plot import short_gap_label
         self.assertEqual(short_gap_label('No ECMWF run found for this day'), 'No ECMWF run')
         self.assertEqual(short_gap_label('New source diagnostic'), 'New source diagnostic')
         self.assertEqual(short_gap_label('Not evaluated in this run (disabled or day limit)'),
@@ -182,8 +182,8 @@ class PipelineTests(unittest.TestCase):
             with patch.dict('os.environ', {'ENTSOE_API_KEY': 'test-only'}), \
                  patch('utils.get_installed_capacity.get_installed_power', side_effect=ConnectionError), \
                  patch('entsoe.EntsoePandasClient.query_generation', side_effect=ConnectionError), \
-                 patch('utils.offshore_utils.fetch_offshore_weather', return_value=self.raw.iloc[:0]), \
-                 patch('utils.offshore_final_data.time.sleep'):
+                 patch('utils.weather.fetch_offshore_weather', return_value=self.raw.iloc[:0]), \
+                 patch('utils.offshore.final_data.time.sleep'):
                 features, kept_generation, kept_capacity, events, _ = data.refresh_sources(
                     root, end_day='2026-06-12', max_requests=1)
             self.assertTrue(features.empty)

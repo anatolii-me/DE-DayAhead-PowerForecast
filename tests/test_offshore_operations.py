@@ -7,12 +7,12 @@ from unittest.mock import patch, Mock
 
 import pandas as pd
 
-from utils.offshore_daily import run, refresh_scored_actuals, recover_current_day, refresh_display_actuals
-from utils.offshore_final_data import grid
-from utils.offshore_simulation import prepare
-from utils.offshore_day_ahead import capacity_for_targets
-from utils.offshore_dashboard import DashboardDataError
-from utils.offshore_dashboard import DashboardPaths, load_forward_predictions
+from utils.offshore.daily import run, refresh_scored_actuals, recover_current_day, refresh_display_actuals
+from utils.offshore.final_data import grid
+from utils.offshore.simulation import prepare
+from utils.offshore.day_ahead import capacity_for_targets
+from utils.offshore.dashboard import DashboardDataError
+from utils.offshore.dashboard import DashboardPaths, load_forward_predictions
 
 
 class OperationsTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class OperationsTests(unittest.TestCase):
         complete_day = pd.DataFrame({"gen_wind_off_act": 1000.0}, index=grid(day))
         training = complete_day.iloc[:2].copy()
         original = training.copy(deep=True)
-        with tempfile.TemporaryDirectory() as tmp, patch("utils.offshore_daily.fetch_generation_day",
+        with tempfile.TemporaryDirectory() as tmp, patch("utils.offshore.daily.fetch_generation_day",
                 return_value=(complete_day, 96)):
             log = {}
             latest = refresh_display_actuals(Path(tmp), training, now, log)
@@ -49,10 +49,10 @@ class OperationsTests(unittest.TestCase):
                           "offshore_capacity": [10.0]}).to_parquet(cache / "capacity.parquet")
             sentinel = root / "dashboard_data/day_ahead_predictions.parquet"
             sentinel.write_bytes(b"tomorrow unchanged")
-            with patch("utils.offshore_daily.training_rows", return_value=(train, "start", "end", [])) as training, \
-                 patch("utils.offshore_daily.current_weather", return_value=weather) as fetch, \
-                 patch("utils.offshore_final_evaluation.build_model", return_value=model), \
-                 patch("utils.offshore_final_evaluation.make_training_weights", return_value=None):
+            with patch("utils.offshore.daily.training_rows", return_value=(train, "start", "end", [])) as training, \
+                 patch("utils.offshore.daily.current_weather", return_value=weather) as fetch, \
+                 patch("utils.offshore.final_evaluation.build_model", return_value=model), \
+                 patch("utils.offshore.final_evaluation.make_training_weights", return_value=None):
                 recover_current_day(root, pd.DataFrame(), day, selection)
             self.assertEqual(training.call_args.args[1], day)
             self.assertEqual(fetch.call_args.args[1], day - pd.DateOffset(days=1))
@@ -62,7 +62,7 @@ class OperationsTests(unittest.TestCase):
             self.assertEqual(sentinel.read_bytes(), b"tomorrow unchanged")
             self.assertFalse((root / "dashboard_data/model").exists())
             # A second recovery reuses the archived reconstruction.
-            with patch("utils.offshore_daily.current_weather") as fetch:
+            with patch("utils.offshore.daily.current_weather") as fetch:
                 recover_current_day(root, pd.DataFrame(), day, selection)
                 fetch.assert_not_called()
 
@@ -76,7 +76,7 @@ class OperationsTests(unittest.TestCase):
                                   "capacity_mw": 10000.0})
             frame.to_parquet(issued)
             before = issued.read_bytes()
-            with patch("utils.offshore_daily.training_rows") as train:
+            with patch("utils.offshore.daily.training_rows") as train:
                 recover_current_day(root, pd.DataFrame(), day, {})
                 train.assert_not_called()
             pending = pd.read_parquet(root / "dashboard_data/pending_predictions.parquet")
@@ -118,7 +118,7 @@ class OperationsTests(unittest.TestCase):
             (public / "issued/2026-11-11.parquet").write_bytes(b"fixture")
             (public / "status.json").write_text(json.dumps({"forecast_day": "2026-11-11",
                 "forecast_status": "issued", "fit_mode": "fresh"}))
-            with patch("utils.offshore_daily.refresh_sources") as refresh:
+            with patch("utils.offshore.daily.refresh_sources") as refresh:
                 run(root, clock=lambda: pd.Timestamp("2026-11-10 06:00Z"))
             refresh.assert_not_called()
 
@@ -148,7 +148,7 @@ class OperationsTests(unittest.TestCase):
             (source / "dashboard_data/value.txt").write_text("original")
             files = ["data/raw_data/gen_act_per_type_2024-03-13_to_2026-06-11.parquet",
                      "data/raw_data/wind_offshore_installed_capacity_2024-01-01_to_2026-07-01.parquet"]
-            from utils.offshore_daily import ORIGINAL
+            from utils.offshore.daily import ORIGINAL
             for name in [str(ORIGINAL), *files]:
                 path = source / name
                 path.parent.mkdir(parents=True, exist_ok=True)
