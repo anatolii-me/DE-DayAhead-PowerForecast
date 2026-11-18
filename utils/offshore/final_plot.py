@@ -4,7 +4,7 @@ from html import escape
 import pandas as pd
 import plotly.graph_objects as go
 
-from utils.offshore_final_data import TZ, grid
+from utils.offshore.final_data import TZ, grid
 
 
 def short_gap_label(reason):

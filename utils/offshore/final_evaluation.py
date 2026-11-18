@@ -12,7 +12,7 @@ import xgboost as xgb
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
-from utils.offshore_final_data import grid, frame_hash, save_parquet, TZ, FIRST_NEW_DAY
+from utils.offshore.final_data import grid, frame_hash, save_parquet, TZ, FIRST_NEW_DAY
 
 # Use available CPUs on a hosted runner as well as on the local machine.
 N_THREADS = min(4, os.cpu_count() or 1)

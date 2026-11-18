@@ -12,9 +12,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from utils.offshore_dashboard import DashboardDataError
-from utils.offshore_day_ahead import current_weather, fit_model_snapshot, issue_tomorrow_forecast, training_rows
-from utils.offshore_final_data import (
+from utils.offshore.dashboard import DashboardDataError
+from utils.offshore.day_ahead import current_weather, fit_model_snapshot, issue_tomorrow_forecast, training_rows
+from utils.offshore.final_data import (
     FIRST_NEW_DAY, assemble_dataset, fetch_generation_day, grid, refresh_sources, save_parquet,
 )
 
@@ -96,7 +96,7 @@ def wait_for_critical_sources(root: Path, generation: pd.DataFrame, end_day: pd.
 def extend_backtest(root: Path, dataset: pd.DataFrame, coverage: pd.DataFrame,
                     selection: dict) -> pd.DataFrame:
     """Fit only unscored complete days, preserving forecasts issued live."""
-    from utils.offshore_final_evaluation import build_model, make_training_weights
+    from utils.offshore.final_evaluation import build_model, make_training_weights
 
     path = root / PUBLIC / "latest_predictions.parquet"
     existing = pd.read_parquet(path) if path.exists() else pd.DataFrame()
@@ -177,8 +177,8 @@ def recover_current_day(root: Path, dataset: pd.DataFrame, day: pd.Timestamp,
     This never changes the operational model or tomorrow's forecast. Recovered
     values retain their provenance when actuals later become available.
     """
-    from utils.offshore_day_ahead import capacity_for_targets
-    from utils.offshore_final_evaluation import build_model, make_training_weights
+    from utils.offshore.day_ahead import capacity_for_targets
+    from utils.offshore.final_evaluation import build_model, make_training_weights
 
     public = root / PUBLIC
     targets = grid(day)
@@ -441,7 +441,7 @@ def bootstrap_model(root: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--offline", action="store_true", help="Use cached sources and do not issue a forward forecast")
     parser.add_argument("--bootstrap-model", action="store_true", help="Fit the initial reusable model from cached data")
     parser.add_argument("--backtest", action="store_true", help="Extend retrospective scores after forecasting")

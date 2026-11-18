@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from utils.offshore_final_features import (
+from utils.offshore.final_features import (
     add_wind_components, interpolate_run_point, aggregate_weather,
 )
 
@@ -79,7 +79,7 @@ def fetch_generation_day(day, cached, cache_path):
 
 def weather_features(raw, run_day):
     """Reject incomplete runs before regional means can hide missing points."""
-    from utils.offshore_utils import SEA_POINTS
+    from utils.weather import SEA_POINTS
     if raw.empty:
         raise ValueError('No ECMWF run found for this day')
     run_day = pd.Timestamp(run_day)
@@ -117,7 +117,7 @@ def weather_features(raw, run_day):
 
 def fetch_weather_with_fallback(run_day):
     """Retry an incomplete 14-point response as two smaller source requests."""
-    from utils.offshore_utils import SEA_POINTS, fetch_offshore_weather
+    from utils.weather import SEA_POINTS, fetch_offshore_weather
 
     date = str(pd.Timestamp(run_day).date())
     raw = fetch_offshore_weather(date, date)
@@ -140,7 +140,7 @@ def fetch_weather_with_fallback(run_day):
 
 def cached_weather_features(raw, run_day, cache_dir):
     """Reuse exact feature values until the raw run or transformation changes."""
-    from utils import offshore_final_features
+    from utils.offshore import final_features as offshore_final_features
     normalized = raw.sort_values(['datetime_run_utc', 'datetime_utc', 'point_id']).reset_index(drop=True)
     identity = dict(raw=frame_hash(normalized), run=str(pd.Timestamp(run_day)),
                     code=hashlib.sha256(Path(__file__).read_bytes() +

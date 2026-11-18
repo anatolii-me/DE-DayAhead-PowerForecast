@@ -11,8 +11,8 @@ import sys
 
 import pandas as pd
 
-from utils.offshore_daily import ORIGINAL, run
-from utils.offshore_final_data import FIRST_NEW_DAY
+from utils.offshore.daily import ORIGINAL, run
+from utils.offshore.final_data import FIRST_NEW_DAY
 
 
 def prepare(source: Path, destination: Path) -> None:
@@ -41,7 +41,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, help="New sandbox directory")
     parser.add_argument("--preview", type=Path, help="Preview an existing simulation on localhost")
     args = parser.parse_args()
-    source = Path(__file__).resolve().parents[1]
+    source = Path(__file__).resolve().parents[2]
     if args.preview:
         destination = args.preview.resolve()
         metadata = json.loads((destination / "simulation.json").read_text())
@@ -78,7 +78,7 @@ def main() -> None:
             del os.environ[key]
     run(destination, clock=lambda: logical_time, simulation=True, backtest=True)
     print(f"Simulation saved to {destination}")
-    print(f'Preview: python -m utils.offshore_simulation --preview "{destination}"')
+    print(f'Preview: python -m utils.offshore.simulation --preview "{destination}"')
 
 
 if __name__ == "__main__":

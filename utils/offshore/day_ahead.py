@@ -17,12 +17,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from utils.offshore_dashboard import BERLIN_TIMEZONE, DashboardDataError, DashboardPaths
+from utils.offshore.dashboard import BERLIN_TIMEZONE, DashboardDataError, DashboardPaths
 
 
 def current_weather(project_root: Path, run_day: pd.Timestamp, features: list[str]) -> pd.DataFrame:
     """Return a complete midnight run, fetching it when the cache is incomplete."""
-    from utils.offshore_final_data import cached_weather_features, fetch_weather_with_fallback, grid, save_parquet
+    from utils.offshore.final_data import cached_weather_features, fetch_weather_with_fallback, grid, save_parquet
 
     cache = project_root / "dashboard_data/source_cache"
     raw_path = cache / "weather" / f"{run_day.date()}.parquet"
@@ -72,7 +72,7 @@ def _save_model(model, metadata: dict, directory: Path) -> None:
 def fit_model_snapshot(project_root: Path, dataset: pd.DataFrame,
                        target_day: pd.Timestamp, selection: dict, *, clock=None):
     """Fit and persist the latest complete 365-day training window."""
-    from utils.offshore_final_evaluation import build_model, make_training_weights
+    from utils.offshore.final_evaluation import build_model, make_training_weights
 
     features = selection["fit_protocol"]["features"]
     config = selection["best_by_model"]["XGBoost"]
@@ -166,8 +166,8 @@ def issue_tomorrow_forecast(
     weather: pd.DataFrame | None = None, reuse_model: bool = False, clock=None,
 ) -> Path:
     """Issue tomorrow's forecast after a fresh fit or from the last saved fit."""
-    from utils.offshore_final_data import grid, save_parquet
-    from utils.offshore_final_evaluation import build_model
+    from utils.offshore.final_data import grid, save_parquet
+    from utils.offshore.final_evaluation import build_model
 
     clock = clock or (lambda: pd.Timestamp.now(tz="UTC"))
     now = clock().tz_convert(BERLIN_TIMEZONE)
@@ -179,7 +179,7 @@ def issue_tomorrow_forecast(
     paths = DashboardPaths.from_project_root(project_root)
     full_dataset_path = project_root / "results/offshore_final/actual_dataset_with_coverage.parquet"
     if dataset is None and not full_dataset_path.exists():
-        raise DashboardDataError("The refreshed full training dataset is missing. Run utils.offshore_daily.")
+        raise DashboardDataError("The refreshed full training dataset is missing. Run utils.offshore.daily.")
     selection_path = project_root / "dashboard_data/frozen_selection.json"
     if not selection_path.exists():
         raise DashboardDataError("The frozen notebook-6 model selection is missing.")
@@ -280,7 +280,7 @@ def issue_tomorrow_forecast(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[2])
     args = parser.parse_args()
     try:
         path = issue_tomorrow_forecast(args.project_root.resolve())
