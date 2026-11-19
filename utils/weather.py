@@ -10,6 +10,7 @@ The offshore wrapper preserves the historical schema and derived formulas.
 New consumers retain explicit API variable names and choose land/sea cells.
 """
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import cast, Literal
 from zoneinfo import ZoneInfo
 import time
@@ -69,7 +70,11 @@ def _build_client() -> openmeteo_requests.Client:
     cache_session = requests_cache.CachedSession(backend="memory", expire_after=0)
     retry_session = cast(
         niquests.Session,
-        retry(cache_session, retries=5, backoff_factor=0.2),
+        # urllib3 otherwise retries HTTP 429 when Retry-After is present,
+        # even though 429 is absent from status_forcelist. That can sleep
+        # for an hour/day before our checkpoint handler ever sees the limit.
+        retry(cache_session, retries=5, backoff_factor=0.2,
+              respect_retry_after_header=False),
     )
     return openmeteo_requests.Client(session=retry_session)
  
@@ -114,6 +119,45 @@ def _target_hours(day: pd.Timestamp) -> pd.DatetimeIndex:
     start = (day + pd.DateOffset(days=1)).tz_localize(BERLIN_TZ).tz_convert("UTC")
     end = (day + pd.DateOffset(days=2)).tz_localize(BERLIN_TZ).tz_convert("UTC")
     return pd.date_range(start - pd.Timedelta(hours=1), end, freq="h")
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Recognize Open-Meteo's HTTP 429, including the SDK's wrapped error."""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if getattr(getattr(exc, "response", None), "status_code", None) == 429:
+            return True
+        for arg in exc.args:
+            if isinstance(arg, dict):
+                reason = str(arg.get("reason", "")).lower()
+                if "limit exceeded" in reason or "too many requests" in reason:
+                    return True
+        if "429" in str(exc) and "too many requests" in str(exc).lower():
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+def _save_weather_checkpoint(parts: list[pd.DataFrame], path: Path,
+                             columns: list[str]) -> pd.DataFrame:
+    result = (pd.concat(parts, ignore_index=True)
+              .sort_values(["point_id", "datetime_run_utc", "datetime_utc"])
+              .reset_index(drop=True)) if parts else pd.DataFrame(columns=columns)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        result[columns].to_parquet(temporary, index=False)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    if result.empty:
+        print(f"  Saved no runs: {path}")
+    else:
+        dates = pd.to_datetime(result.datetime_run_utc, utc=True).dt.date
+        print(f"  Saved {dates.nunique()} runs, {dates.min()} -> {dates.max()} "
+              f"({len(result)} rows): {path}")
+    return result
 
 
 def _fetch_day(
@@ -170,6 +214,7 @@ def fetch_weather_singleruns(
     model: str = "ecmwf_ifs",
     errors: Literal["raise", "skip"] = "raise",
     require_complete: bool = True,
+    checkpoint_path: str | Path | None = None,
 ) -> pd.DataFrame:
     """Fetch inclusive midnight run dates with a common D+1 delivery window.
 
@@ -187,7 +232,10 @@ def fetch_weather_singleruns(
     gaps in research data. ``errors="skip"`` warns and continues; inspect the
     returned coverage before saving. ``require_complete=False`` leaves NaNs
     and short grids for a caller with its own validation/recovery policy.
-    No interpolation, regional aggregation or disk writes occur here.
+    With ``checkpoint_path``, validated runs are saved every 30 days and on
+    exit. A subsequent call resumes missing run dates from that file. HTTP
+    429 stops the loop, saves the available runs and returns them. Without a
+    checkpoint path, HTTP 429 still stops and returns the in-memory runs.
     """
     if model != "ecmwf_ifs":
         raise NotImplementedError("Only model='ecmwf_ifs' is currently supported.")
@@ -227,21 +275,68 @@ def fetch_weather_singleruns(
     if start > end:
         return pd.DataFrame(columns=columns)
 
-    client = _build_client()
+    path = Path(checkpoint_path) if checkpoint_path is not None else None
     parts = []
+    completed = set()
+    if path is not None and path.exists():
+        saved = pd.read_parquet(path)
+        if list(saved.columns) != columns:
+            raise ValueError(f"Checkpoint columns do not match this request: {path}")
+        if not saved.empty:
+            if set(saved.point_id) != set(points):
+                raise ValueError(f"Checkpoint points do not match this request: {path}")
+            saved_dates = pd.to_datetime(saved.datetime_run_utc, utc=True)
+            if (saved_dates.min() < start.tz_localize("UTC")
+                    or saved_dates.max() > end.tz_localize("UTC")):
+                raise ValueError(f"Checkpoint run dates are outside the requested range: {path}")
+            completed = set(saved_dates.dt.tz_localize(None).dt.normalize())
+            for day in completed:
+                run = saved.loc[saved_dates.eq(day.tz_localize("UTC"))]
+                expected = _target_hours(day)
+                if (len(run) != len(points) * len(expected)
+                        or any(not pd.DatetimeIndex(run.loc[run.point_id.eq(pid), "datetime_utc"])
+                               .as_unit("ns").sort_values().equals(expected.as_unit("ns"))
+                               for pid in points)
+                        or (require_complete and not np.isfinite(run[var_names].to_numpy()).all())):
+                    raise ValueError(f"Incomplete checkpoint run {day.date()}: {path}")
+            parts.append(saved)
+            print(f"  Resuming {path}: {len(completed)} runs already saved")
+    client = _build_client()
+    new_runs = 0
+    last_saved_count = 0
+    # Multi-location requests consume more of the free API's minute budget.
+    # Target at most 400 point-requests/minute, leaving room below its 600
+    # calls/minute limit and for other users of the same IP address.
+    pace_seconds = max(1.5, len(points) * 0.15)
     print(f"Run range {start.date()} -> {end.date()} (ECMWF IFS HRES)")
     print("  Target: calendar day D+1 in Europe/Berlin, +/-1-hour buffer")
+    print(f"  Request pacing: {pace_seconds:g}s after each run for {len(points)} points")
     for day in pd.date_range(start, end, freq="D"):
+        if day in completed:
+            continue
         try:
             parts.append(_fetch_day(day, points, model, var_names, cell_selection,
                                     client, require_complete))
+            new_runs += 1
         except Exception as exc:
+            if _is_rate_limit_error(exc):
+                print(f"  Open-Meteo rate limit at run {day.date()}: {exc}")
+                if path is not None:
+                    _save_weather_checkpoint(parts, path, columns)
+                    last_saved_count = new_runs
+                break
             if errors == "raise":
+                if path is not None and new_runs:
+                    _save_weather_checkpoint(parts, path, columns)
                 raise
             warnings.warn(f"Error for run {day.date()} [{model}]: {exc}", RuntimeWarning, stacklevel=2)
-        finally:
-            # Preserve the scheduled pipeline's request pacing, including failures.
-            time.sleep(1.5)
+        if path is not None and new_runs - last_saved_count >= 30:
+            _save_weather_checkpoint(parts, path, columns)
+            last_saved_count = new_runs
+        # Preserve the scheduled pipeline's request pacing, including failures.
+        time.sleep(pace_seconds)
+    if path is not None and new_runs > last_saved_count:
+        _save_weather_checkpoint(parts, path, columns)
     if not parts:
         return pd.DataFrame(columns=columns)
     result = (pd.concat(parts, ignore_index=True)
@@ -284,6 +379,7 @@ def fetch_load_weather(
     model: str = "ecmwf_ifs",
     *,
     errors: Literal["raise", "skip"] = "raise",
+    checkpoint_path: str | Path | None = None,
 ) -> pd.DataFrame:
     """Land weather for load: temperature_2m (C), wind_speed_10m (m/s),
     shortwave_radiation (W/m2, mean over the preceding hour), cloud_cover (%).
@@ -295,7 +391,7 @@ def fetch_load_weather(
     """
     return fetch_weather_singleruns(
         start_date, end_date, points, LOAD_VARIABLES, cell_selection="land",
-        model=model, errors=errors,
+        model=model, errors=errors, checkpoint_path=checkpoint_path,
     )
  
  

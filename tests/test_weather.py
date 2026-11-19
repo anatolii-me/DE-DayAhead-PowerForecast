@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import pandas as pd
+from openmeteo_requests import OpenMeteoRequestsError
 
 from utils import weather
 from utils.offshore.final_data import fetch_weather_with_fallback, weather_features
@@ -82,6 +83,7 @@ class WeatherTests(unittest.TestCase):
         params = self.client.weather_api.call_args.kwargs['params']
         self.assertEqual(params['cell_selection'], 'land')
         self.assertEqual(params['hourly'], list(weather.LOAD_VARIABLES))
+        weather.time.sleep.assert_called_once_with(3.0)
         row = actual.iloc[0]
         self.assertEqual(row.temperature_2m, 21)  # first hour is D 21:00 UTC in summer
         self.assertEqual(row.wind_speed_10m, 121)
@@ -150,6 +152,50 @@ class WeatherTests(unittest.TestCase):
         self.assertEqual(len(actual), 26)
         self.assertTrue(actual.datetime_run_utc.eq(pd.Timestamp('2025-05-02', tz='UTC')).all())
 
+    def test_rate_limit_saves_partial_run_and_resumes(self):
+        points = {1: [8, 51, 'load']}
+        def limited(url, params, timeout):
+            if params['run'].startswith('2025-05-02'):
+                try:
+                    raise OpenMeteoRequestsError({
+                        'error': True,
+                        'reason': 'Hourly API request limit exceeded. Please try again in the next hour.',
+                    })
+                except OpenMeteoRequestsError as cause:
+                    raise OpenMeteoRequestsError(f'failed to request: {cause}') from cause
+            return fake_api(url, params, timeout)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'weather.parquet'
+            self.client.weather_api.side_effect = limited
+            partial = weather.fetch_load_weather('2025-05-01', '2025-05-03', points,
+                                                 checkpoint_path=path)
+            self.assertEqual(len(partial), 26)
+            pd.testing.assert_frame_equal(partial, pd.read_parquet(path), check_dtype=False)
+            self.assertEqual(self.client.weather_api.call_count, 2)
+
+            self.client.weather_api.reset_mock(side_effect=True)
+            self.client.weather_api.side_effect = fake_api
+            complete = weather.fetch_load_weather('2025-05-01', '2025-05-03', points,
+                                                  checkpoint_path=path)
+            self.assertEqual(len(complete), 3 * 26)
+            self.assertEqual(self.client.weather_api.call_count, 2)
+            self.assertEqual(self.client.weather_api.call_args_list[0].kwargs['params']['run'],
+                             '2025-05-02T00:00')
+            pd.testing.assert_frame_equal(complete, pd.read_parquet(path), check_dtype=False)
+
+    def test_daily_limit_before_first_run_saves_empty_checkpoint(self):
+        self.client.weather_api.side_effect = OpenMeteoRequestsError({
+            'error': True, 'reason': 'Daily API request limit exceeded. Please try again tomorrow.',
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'weather.parquet'
+            result = weather.fetch_load_weather('2025-05-01', '2025-05-02',
+                                                {1: [8, 51, 'load']}, checkpoint_path=path)
+            self.assertTrue(result.empty)
+            self.assertTrue(pd.read_parquet(path).empty)
+            self.assertEqual(self.client.weather_api.call_count, 1)
+
     def test_short_point_response_triggers_existing_split_retry(self):
         def incomplete(url, params, timeout):
             result = fake_api(url, params, timeout)
@@ -198,6 +244,12 @@ class WeatherTests(unittest.TestCase):
 
 
 class PackageTests(unittest.TestCase):
+    def test_http_429_is_not_retried_when_retry_after_is_present(self):
+        client = weather._build_client()
+        policy = client._session.get_adapter('https://').max_retries
+        self.assertFalse(policy.is_retry('GET', 429, has_retry_after=True))
+        self.assertTrue(policy.is_retry('GET', 500))
+
     def test_package_modules_import_and_reload(self):
         names = ['cf_diagnostics', 'daily', 'dashboard', 'day_ahead', 'final_baselines',
                  'final_data', 'final_evaluation', 'final_features', 'final_plot', 'simulation']
