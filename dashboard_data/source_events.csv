@@ -1,2 +1,10 @@
 source,day,status
-weather,2026-06-24,unavailable
+capacity,2026-11-20,updated
+generation,2026-11-13,received 96/96
+generation,2026-11-14,received 96/96
+generation,2026-11-15,received 96/96
+generation,2026-11-16,received 96/96
+generation,2026-11-17,received 96/96
+generation,2026-11-18,received 96/96
+generation,2026-11-19,received 96/96
+weather,2026-06-24,ValueError
