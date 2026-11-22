@@ -42,12 +42,12 @@
     "doy_sin",
     "doy_cos"
   ],
-  "fitted_at_utc": "2026-11-21 06:10:16.295159+00:00",
-  "training_start_utc": "2025-11-20 23:00:00+00:00",
-  "training_end_exclusive_utc": "2026-11-20 23:00:00+00:00",
+  "fitted_at_utc": "2026-11-22 06:08:41.161537+00:00",
+  "training_start_utc": "2025-11-21 23:00:00+00:00",
+  "training_end_exclusive_utc": "2026-11-21 23:00:00+00:00",
   "train_rows": 34944,
   "dropped_train_days": [
     "2026-06-24"
   ],
-  "model_sha256": "b12165391d0491979ce082e8e4766d14abaddad07f8e6c6948df9cd1c61f6f76"
+  "model_sha256": "e35163e9e7deeeccb57c6352a5a0ead9705fa9143b25e67d861dd81e46c350a7"
 }
