@@ -21,3 +21,7 @@ entsoe_point_in_time_check.ipynb
 utils/test_entsoe_fetcher.ipynb
 results/
 /dashboard_data/source_cache/features/
+
+# Data
+# Too big
+load_dataset_15m_2024-03-18_to_2026-11-17.parquet 
