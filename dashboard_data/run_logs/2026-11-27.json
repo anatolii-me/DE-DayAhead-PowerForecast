@@ -1,17 +1,22 @@
 {
   "issue_day": "2026-11-27",
   "forecast_day": "2026-11-28",
-  "started_at_utc": "2026-11-27 05:34:06.908118+00:00",
+  "started_at_utc": "2026-11-27 06:02:57.692000+00:00",
   "retry_minutes": 15,
   "cutoff_local": "11:30 Europe/Berlin",
   "attempts": [
     {
       "source": "ECMWF midnight run",
-      "at_utc": "2026-11-27 05:37:56.007244+00:00",
-      "outcome": "ValueError"
+      "at_utc": "2026-11-27 06:05:26.892264+00:00",
+      "outcome": "complete"
+    },
+    {
+      "source": "ENTSO-E display actuals",
+      "at_utc": "2026-11-27 06:05:30.883331+00:00",
+      "outcome": "received 26 completed intraday intervals"
     }
   ],
-  "completed_at_utc": "2026-11-27 05:37:56.406049+00:00",
+  "completed_at_utc": "2026-11-27 06:05:53.923617+00:00",
   "simulation": false,
   "source_events": [
     {
@@ -60,15 +65,15 @@
       "status": "ValueError"
     }
   ],
-  "result": "weather_unavailable",
-  "fit_mode": null,
+  "result": "issued",
+  "fit_mode": "fresh",
   "training_data_status": "complete",
-  "model_fitted_at_utc": "2026-11-26 06:07:51.583374+00:00",
-  "training_start_utc": "2025-11-25 23:00:00+00:00",
-  "training_end_exclusive_utc": "2026-11-25 23:00:00+00:00",
+  "model_fitted_at_utc": "2026-11-27 06:05:30.568635+00:00",
+  "training_start_utc": "2025-11-26 23:00:00+00:00",
+  "training_end_exclusive_utc": "2026-11-26 23:00:00+00:00",
   "train_rows": 34944,
   "dropped_train_days": [
     "2026-06-24"
   ],
-  "failure_reason": "The current ECMWF midnight run is unavailable; retry within the morning window."
+  "failure_reason": null
 }
